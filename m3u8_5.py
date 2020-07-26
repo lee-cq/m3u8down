@@ -17,31 +17,36 @@ v4: 一定意义上完成了m3u8Down的所有基本功能。
     使用了copy二进制文件的方式合并文件
     加入了AES-128的解码器，并在下载文件时解码。
 
-v5: [ ]优化解码位置，下载文件时，把KEY文件也下载到源文件夹，方便本地直接使用m3u8播放(重命名).
-    [ ]文件含有多个Key时解析key.
-    [ ]下载块重命名, 最好直接在解析的时候就规划好重命名的规则并写入sql(很多的ts文件使用参数寻址,文件名完全一样,重命名)
-    [ ]优化文件合并的方式
-    [ ]详细注释                             -- ok 2020/3/7
-    [ ]可以指定其他的合并输出目录             -- ok 2020/3/7
-    [ ]可以指定m3u8文件夹的目录
-    [ ]在下载未完成前合并的问题。
+v5: [F]优化解码位置，下载文件时，把KEY文件也下载到源文件夹，方便本地直接使用m3u8播放(重命名).
+        直接保存解码后的ts文件.
+    [T]文件含有多个Key时解析key.
+    [T]下载块重命名, 最好直接在解析的时候就规划好重命名的规则并写入sql(很多的ts文件使用参数寻址,文件名完全一样,重命名)
+    [T]优化文件合并的方式
+    [T]详细注释                             -- ok 2020/3/7
+    [T]可以指定其他的合并输出目录             -- ok 2020/3/7
+    [T]可以指定m3u8文件夹的目录
+    [T]在下载未完成前合并的问题。
 
 """
 import logging
+import os  # 系统相关组件
 import sys
+import threading
+import time
+import pathlib
+import m3u8  # 网络相关组件
+import requests
+import urllib3
+from Crypto.Cipher import AES  # 解码器AES
+from sqlite3 import OperationalError, Binary
+from SQL import SQLiteAPI  # SQLite数据库操作 -- 自定义
 
 logger = logging.getLogger("logger")  # 创建实例
 formatter = logging.Formatter("[%(asctime)s] < %(funcName)s: %(lineno)d > [%(levelname)s] %(message)s")
 # 终端日志
 consle_handler = logging.StreamHandler(sys.stdout)
 consle_handler.setFormatter(formatter)  # 日志文件的格式
-logger.setLevel(logging.DEBUG)  # 设置日志文件等级
-
-import requests, urllib3, m3u8  # 网络相关组件
-import os, time, threading  # 系统相关组件
-from sqlite3 import OperationalError
-from SQL.SQLite import SQLiteAPI  # SQLite数据库操作 -- 自定义
-from Crypto.Cipher import AES  # 解码器AES
+logger.setLevel(logging.INFO)  # 设置日志文件等级
 
 __all__ = ['M3U8', 'M3U8Error', 'M3U8KeyError', 'PlayListError', 'HTTPGetError']
 
@@ -118,7 +123,7 @@ class M3U8:
 
     def __init__(self, url_m3u8: str, verify=False, retry=5, timeout=90, threads=5,
                  local_root='./down/', save_path='', save_name='', debug_level=3,
-                 strict_mode=True, is_out_json=True,
+                 strict_mode=True, is_out_json=True, key=''
                  ):
         """
         :param url_m3u8: str - 需要下载的M3U8地址。
@@ -132,8 +137,8 @@ class M3U8:
         :param strict_mode: bool - 严格模式，出现异常直接抛出错误
         :param is_out_json: bool - 导出json格式的文件
         """
-
-        save_name = url_m3u8.split('/')[-1].split('.')[0] + time.strftime('-%Y%m%d%H%M') if not save_name else save_name
+        self.save_name = save_name if save_name else url_m3u8.split('/')[-1].split('.')[0] + time.strftime(
+            '-%Y%m%d%H%M')
         #
         self.input_url = url_m3u8
         self.retry, self.timeout, self.threads = retry, timeout, threads
@@ -145,6 +150,7 @@ class M3U8:
         self.m3u8_root_dir = local_root + save_name if local_root.endswith('/') else local_root + '/' + save_name
         os.makedirs(self.m3u8_root_dir, exist_ok=True)
         self.fileName = save_name
+        self.key = pathlib.Path(key).read_bytes() if key else None
 
         # 构建SQLite
         self.sql = SQLiteAPI(os.path.join(self.m3u8_root_dir, 'm3u8Info.db'))
@@ -158,6 +164,11 @@ class M3U8:
         self.configuration = dict()
         self.config_init()
         self.tmp_down_count = 0
+
+    def set_key(self, path):
+        """设置Key - AES-128"""
+        with open(path, 'rb') as f:
+            return f.read()
 
     def SQL_create_master(self):
         """创建表: master"""
@@ -173,7 +184,7 @@ class M3U8:
               "abs_uri  varchar(160) not null UNIQUE, "
               "segment_name varchar(50) , "
               "duration float, "
-              "key      varchar(50), "
+              "key      blob, "
               "key_uri   varchar(160), "
               "key_name varchar(50), "
               "method   varchar(10), "
@@ -226,7 +237,7 @@ class M3U8:
                 _data = self.client.get(url=url, headers=header, timeout=self.timeout)
                 if _data.status_code == 200:
                     if self.debug_level > 2:
-                        logger.info(f'HTTP正常返回 [200]: {url}')
+                        logger.debug(f'HTTP正常返回 [200]: {url}')
                     return _data
                 else:
                     _e += f'[STATUS_CODE: {_data.status_code}]'
@@ -308,7 +319,7 @@ class M3U8:
                             segment_name=None if _is_m3u8 == "M3U8" else 'ts' + f'{__segments.index(_)}'.rjust(4,
                                                                                                                '0') + '.ts',
                             duration=_.duration,
-                            key=key,
+                            key=Binary(self.key) if self.key is not None else Binary(key),
                             key_name=None if _is_m3u8 == "M3U8" else 'key' + f'{__segments.index(_)}'.rjust(4,
                                                                                                             '0') + '.key',
                             key_uri=None if _is_m3u8 == "M3U8" else _.key.absolute_uri,
@@ -339,7 +350,7 @@ class M3U8:
                 table_name = f'segment_{index}'
                 if table_name not in self.sql.show_tables(name_only=True):
                     self.SQL_create_segments(table_name)
-                    self.sql.insert(table_name, idd=0, abs_uri=_uri)
+                    self.sql.insert(table_name, idd=0, abs_uri=_uri, segment_name='index.m3u8')
                     self.sql.insert('config', key_=table_name + '_uri', value_=_uri)
                     self.m3u8_segments(_m3u8, table_name)
                     break
@@ -370,7 +381,8 @@ class M3U8:
     def decode_AES128(data: bytes, key, iv='') -> bytes:
         """AES128解密"""
         if iv:
-            ASE128 = AES.new(bytes(key, encoding='utf8'), AES.MODE_CBC, bytes(iv, encoding='utf8'))
+            ASE128 = AES.new(key if isinstance(key, bytes) else bytes(key, encoding='utf8'), AES.MODE_CBC,
+                             bytes(iv[-16:], encoding='utf8'))
         else:
             ASE128 = AES.new(bytes(key, encoding='utf8'), AES.MODE_CBC)
         return ASE128.decrypt(data)
@@ -389,7 +401,7 @@ class M3U8:
             return -1
         if seg.get('method') == 'AES-128':
             print(seg['iv'][2:])
-            _ts = self.decode_AES128(_ts, _key, seg['iv'][2:])
+            _ts = self.decode_AES128(_ts, seg['key'], seg['iv'][2:])
         elif seg.get('method') is None:
             pass
         # 在这里可以添加解密函数 添加的函数需要decode_开始<<<
@@ -402,6 +414,7 @@ class M3U8:
 
     def ts_index(self):
         """启用多线程下载"""
+        print('\n')
         logger.info('尝试下载视频块文件...')
         if not [_ for _ in self.sql.show_tables() if _.startswith('segment')]:
             raise M3U8Error
@@ -453,18 +466,21 @@ class M3U8:
 
     def combine_index(self):
         """合并下载的内容"""
+        print('\n')
         logger.info(f'尝试合并 ...')
-        segments_name = [i[0] for i in self.sql.select('segment_0', 'segment_name', ORDER='idd') if i[0] is not None]
+        segments_name = [i[0] for i in self.sql.select('segment_0', 'segment_name', ORDER='idd')
+                         if i[0] is not None and i[0].endswith('ts')
+                         ]
         dir_root = os.path.abspath(self.out_path)
         # print(segments_name, len(segments_name))
 
-        files = [os.path.join(dir_root, "segment_0", _[0].split('/')[-1])
+        files = [os.path.join(dir_root, self.save_name, "segment_0", _.split('/')[-1])
                  for _ in segments_name
-                 if _[0].endswith('ts')
                  ]  # 构建文件列表的绝对路径
         if len(files) != len(segments_name):
-            raise FileNotFoundError("ts文件下载不完全 ... ")
-        newFile = os.path.join(dir_root, self.fileName + ".mp4")  # 构建输出文件的绝对路径吗
+            print(f'(文件: {len(files)} 数据库{len(segments_name)})')
+            raise FileNotFoundError(f"ts文件下载不完全  ... ")
+        newFile = os.path.join(dir_root, self.fileName + ".mp4")  # 构建输出文件的绝对路径
         self.combine_winCopy(segments=files, out_file=newFile)
 
     def clear_index(self):
@@ -472,8 +488,12 @@ class M3U8:
 
         db, json, ts, m3u8
         """
+        import shutil
+        self.sql.close_db()
+        shutil.rmtree(os.path.join(self.out_path, self.save_name), ignore_errors=True)
+        # os.rmdir(os.path.join(self.out_path, self.save_name))
 
-    def run(self):
+    def run(self, clear=False):
         """运行"""
         # self.m3u8_index(self.input_url)   # 解析
         # if self.is_out_json: self.m3u8_outJson()
@@ -485,8 +505,8 @@ class M3U8:
             try:
                 self.combine_index()
                 break
-            except (M3U8Error, FileNotFoundError, OperationalError):
-                logger.info('合并文件失败,可能下载不完全...')
+            except (M3U8Error, FileNotFoundError, OperationalError) as e:
+                logger.info(f'合并文件失败,{e}...')
                 try:
                     self.ts_index()
                 except (M3U8Error, OperationalError, FileNotFoundError):
@@ -494,6 +514,8 @@ class M3U8:
                     self.m3u8_index(self.input_url)
                 except Exception as e:
                     raise e
+        if clear:
+            self.clear_index()
 
 
 if __name__ == '__main__':
@@ -508,10 +530,11 @@ if __name__ == '__main__':
 
     # if os.path.exists(db_): os.remove(db_)
     m = M3U8(
-        'https://1400200613.vod2.myqcloud.com/d3af585bvodtranscq1400200613/409d704c5285890805550379503/drm/v.f230.m3u8?t=5f1d59a1&us=zhp97n5k&sign=be588a84881d60f1ee76498926f3cf42',
+        'https://1400200613.vod2.myqcloud.com/d3af585bvodtranscq1400200613/cde3cdb15285890804973367404/drm/v.f230.m3u8?t=5f1e9f49&us=dhmm1ff8&sign=df7ab4b9206851fe57974ee354c6f511',
         local_root=r'C:\Users\LCQ\Desktop\m3u8',
         save_name='WEB测试1',
         debug_level=5,
+        key='./sup/GetKey',
         threads=5
     )
     # m.client_setCookie('Hm_lpvt_7640497445529879f7be1821661cc9e3', str(int(time.time())))
@@ -521,7 +544,9 @@ if __name__ == '__main__':
     # m.client_setCookie('ckCsrfToken', 'N98PG8hyFhMoMW4f60qwuiWZ6KzElQ0iAijt7h3P'
     #                    )
 
-    # m.run()
-    a = m.requests_get(
-        'https://www.atstudy.com/api/courseMedia/GetKey?edk=CiBISQj8jbBPq%2BhZ9Om2n9QtrxpzVTuh7yZlJenU%2BEbaQRCO08TAChiaoOvUBCokZGVkZmJkYjQtNDdhYy00NDQxLTkxYzMtYWY3NTQ3ZTgzZTZm&fileId=5285890805550379503&keySource=VodBuildInKMS')
-    print(a.content, )
+    m.run()
+    # m.clear_index()
+    # a = m.requests_get(
+    #     'https://www.atstudy.com/api/courseMedia/GetKey?edk=CiCDZvMRFr2%2BecDRB9d%2Bzli%2BZhrnF%2BRu5zQ5oAWTnqYFiRCO08TAChiaoOvUBCokZGVkZmJkYjQtNDdhYy00NDQxLTkxYzMtYWY3NTQ3ZTgzZTZm&fileId=5285890804973367404&keySource=VodBuildInKMS')
+    # with open('./sup/key', 'wb') as f:
+    #     f.write(a.content)
