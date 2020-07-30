@@ -6,19 +6,21 @@
 @Date-Time  : 2020/1/5 12:26
 
 """
-import requests
-import os, sys
+import os
 import re
-from bs4 import BeautifulSoup
-from Crypto.Cipher import AES  # 解决Key的问题
+import sys
 import time
+
+import requests
+from Crypto.Cipher import AES  # 解决Key的问题
+from bs4 import BeautifulSoup
 
 
 def progressbar(tot, pre):
-    '''
+    """
     max_bar means the total number of tasks.
     i means the number of finished tasks.
-    '''
+    """
     max_bar = 20
     finish = int(pre * max_bar / tot)
     unfinish = (max_bar - finish)

@@ -150,7 +150,7 @@ class M3U8:
         self.m3u8_root_dir = local_root + save_name if local_root.endswith('/') else local_root + '/' + save_name
         os.makedirs(self.m3u8_root_dir, exist_ok=True)
         self.fileName = save_name
-        self.key = pathlib.Path(key).read_bytes() if key else None
+        self.key = self.set_key(key) if isinstance(key, str) else key
 
         # 构建SQLite
         self.sql = SQLiteAPI(os.path.join(self.m3u8_root_dir, 'm3u8Info.db'))
@@ -165,10 +165,13 @@ class M3U8:
         self.config_init()
         self.tmp_down_count = 0
 
-    def set_key(self, path):
+    @staticmethod
+    def set_key(path):
         """设置Key - AES-128"""
-        with open(path, 'rb') as f:
-            return f.read()
+        _p = pathlib.Path(path)
+        if _p.is_file():
+            return _p.read_bytes()
+        return None
 
     def SQL_create_master(self):
         """创建表: master"""
@@ -400,7 +403,7 @@ class M3U8:
         except:
             return -1
         if seg.get('method') == 'AES-128':
-            print(seg['iv'][2:])
+            # print(seg['iv'][2:])
             _ts = self.decode_AES128(_ts, seg['key'], seg['iv'][2:])
         elif seg.get('method') is None:
             pass
@@ -464,7 +467,7 @@ class M3U8:
     def combine_ffmpeg(self, segments, out_file):
         """使用ffmpeg合并文件"""
 
-    def combine_index(self):
+    def  combine_index(self):
         """合并下载的内容"""
         print('\n')
         logger.info(f'尝试合并 ...')
