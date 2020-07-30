@@ -39,7 +39,7 @@ import requests
 import urllib3
 from Crypto.Cipher import AES  # 解码器AES
 from sqlite3 import OperationalError, Binary
-from SQL import SQLiteAPI  # SQLite数据库操作 -- 自定义
+from m3u8Download.SQL import SQLiteAPI  # SQLite数据库操作 -- 自定义
 
 logger = logging.getLogger("logger")  # 创建实例
 formatter = logging.Formatter("[%(asctime)s] < %(funcName)s: %(lineno)d > [%(levelname)s] %(message)s")
@@ -157,7 +157,7 @@ class M3U8:
         # 模拟HTTP客户端
         self.client = requests.Session()
         self.client.verify = verify
-        self.client_setHeader()
+        self.client_set_header()
         urllib3.disable_warnings()
         #
         self.root_m3u8 = url_m3u8[:url_m3u8.rfind('/') + 1]
@@ -173,7 +173,7 @@ class M3U8:
             return _p.read_bytes()
         return None
 
-    def SQL_create_master(self):
+    def sql_create_master(self):
         """创建表: master"""
         _c = ("abs_uri      varchar(150) not null unique, "
               "resolution   int, "  # 长 * 宽
@@ -181,7 +181,7 @@ class M3U8:
               )
         return self.sql.create_table(table_name='master', keys=_c, ignore_exists=True)
 
-    def SQL_create_segments(self, table_name):
+    def sql_create_segments(self, table_name):
         """创建表: segments"""
         _c = ("idd      INTEGER PRIMARY KEY AUTOINCREMENT, "
               "abs_uri  varchar(160) not null UNIQUE, "
@@ -196,7 +196,7 @@ class M3U8:
         self.sql.create_table(table_name=table_name, keys=_c, ignore_exists=True)
         # self.sql.write_db(f"UPDATE sqlite_sequence SET seq=0 WHERE name=`{table_name}`")
 
-    def SQL_create_config(self):
+    def sql_create_config(self):
         """创建表 - 配置文件"""
         _c = "key_ varchar(50) not null unique, value_ VARCHAR(100)"
         return self.sql.create_table(table_name='config', keys=_c, ignore_exists=True)
@@ -207,16 +207,17 @@ class M3U8:
         self.configuration.setdefault('m3u8Root', self.root_m3u8)
         self.configuration.setdefault('fileName', self.fileName)
         self.configuration.setdefault('updateTime', int(time.time()))
-        self.SQL_create_config()
+        self.sql_create_config()
         self.sql.insert('config', ignore_repeat=True,
                         key_=list(self.configuration.keys()),
                         value_=list(self.configuration.values())
                         )
 
     # 客户端头
-    def client_setHeader(self, header=None):
+    def client_set_header(self, header=None):
         """设值请求头"""
-        if header is None: header = dict()
+        if header is None:
+            header = dict()
         header.setdefault("User-Agent",
                           "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.25 Safari/537.36 Core/1.70.3741.400 QQBrowser/10.5.3863.400", )
         header.setdefault("Accept", "*/*")
@@ -225,7 +226,7 @@ class M3U8:
         self.client.headers.update(header)
 
     # 如果可能 设置cookie
-    def client_setCookie(self, name, value, **kwargs):
+    def client_set_cookie(self, name, value, **kwargs):
         """设置cookies"""
         # self.cookie = _cookies
         self.client.cookies.set(name, value, **kwargs)
@@ -346,23 +347,23 @@ class M3U8:
         logger.info(f"尝试解析m3u8文件：{_uri}")
         _m3u8 = m3u8.load(_uri, timeout=60, headers=self.header)
         if _m3u8.playlists:  # 构建master列表
-            self.SQL_create_master()
+            self.sql_create_master()
             self.m3u8_master(_m3u8)
         if _m3u8.segments:  # 构建segments列表
             for index in range(9):
                 table_name = f'segment_{index}'
                 if table_name not in self.sql.show_tables(name_only=True):
-                    self.SQL_create_segments(table_name)
+                    self.sql_create_segments(table_name)
                     self.sql.insert(table_name, idd=0, abs_uri=_uri, segment_name='index.m3u8')
                     self.sql.insert('config', key_=table_name + '_uri', value_=_uri)
                     self.m3u8_segments(_m3u8, table_name)
                     break
 
-    def m3u8_outJson(self):
+    def m3u8_out_json(self):
         """把m3u8信息导出为JSON"""
         pass
 
-    def segment_totalDuration(self, table_name=None):
+    def segment_total_duration(self, table_name=None):
         """计算总持续时间"""
 
         def __count(_name):
@@ -390,27 +391,29 @@ class M3U8:
             ASE128 = AES.new(bytes(key, encoding='utf8'), AES.MODE_CBC)
         return ASE128.decrypt(data)
 
-    def ts_down(self, seg: dict, dir):
+    def ts_down(self, seg: dict, _dir):
         """下载ts文件
 
         :argument seg: 一个包含块信息的字典
-        :argument dir:
+        :argument _dir:
         """
         try:
-            _ts = self.__requests_get(seg['abs_uri'], self.header).content
-            # _key = self.__requests_get(seg['key_uri'], header=self.header).content
-            _key = 'USpF5ukvXYobhrEoHpzDtw=='
+            _ts = self.__requests_get(seg['abs_uri'], self.header).content  # 下载片段
         except:
             return -1
+        # ==============================================================
+        # 加密视频解码模块
         if seg.get('method') == 'AES-128':
             # print(seg['iv'][2:])
             _ts = self.decode_AES128(_ts, seg['key'], seg['iv'][2:])
         elif seg.get('method') is None:
             pass
         # 在这里可以添加解密函数 添加的函数需要decode_开始<<<
+        # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        # ==============================================================
         fileName = seg['segment_name']
-        filePath = os.path.join(dir, fileName) if not seg['abs_uri'].endswith('m3u8') else os.path.join(dir,
-                                                                                                        'index.m3u8')
+        filePath = os.path.join(_dir, fileName) if not seg['abs_uri'].endswith('m3u8') else os.path.join(_dir,
+                                                                                                         'index.m3u8')
         with open(filePath, 'wb') as f:
             f.write(_ts)
             self.tmp_down_count += 1
@@ -432,9 +435,11 @@ class M3U8:
                     continue
                 # self.ts_down(segInfo, _part_dir)  # 单线程测试
                 threading.Thread(target=self.ts_down, args=(segInfo, _part_dir)).start()  # 启用多线程
-                while threading.active_count() > self.threads: time.sleep(1)  # 线程大于预定时等待继续添加
+                while threading.active_count() > self.threads:
+                    time.sleep(1)  # 线程大于预定时等待继续添加
                 print('\r已下载: ', self.tmp_down_count, '/', total, f'线程数：{threading.active_count()}', end='')
-            while threading.active_count() > 1: time.sleep(1)  # 等待子线程IO结束
+            while threading.active_count() > 1:
+                time.sleep(1)  # 等待子线程IO结束
 
     @staticmethod
     def combine_winCopy(segments, out_file):
@@ -467,7 +472,7 @@ class M3U8:
     def combine_ffmpeg(self, segments, out_file):
         """使用ffmpeg合并文件"""
 
-    def  combine_index(self):
+    def combine_index(self):
         """合并下载的内容"""
         print('\n')
         logger.info(f'尝试合并 ...')

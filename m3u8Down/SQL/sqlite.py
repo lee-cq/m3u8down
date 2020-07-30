@@ -9,15 +9,16 @@ SQLite
 
 2020.01.28 -- _select OFFSET 添加str()
 """
-import sys, logging
+
 import sqlite3
 from .SQLCommon import sql_join
-
+import logging
+import sys
 logger = logging.getLogger("logger")  # 创建实例
 formatter = logging.Formatter("[%(asctime)s] < %(funcName)s: %(thread)d > [%(levelname)s] %(message)s")
 # 终端日志
-consle_handler = logging.StreamHandler(sys.stdout)
-consle_handler.setFormatter(formatter)  # 日志文件的格式
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(formatter)  # 日志文件的格式
 logger.setLevel(logging.DEBUG)  # 设置日志文件等级
 
 
@@ -237,7 +238,8 @@ class MySQLite:
         """
         _a = [_.values() for _ in args]
         if k is None:
-            if not isinstance(args[0], dict): raise ValueError(f'既没有k, 也不是dict')
+            if not isinstance(args[0], dict):
+                raise ValueError(f'既没有k, 也不是dict')
             k = args[0].keys()
         _ignore = 'OR IGNORE' if ignore_repeat else ''
         _c = f"INSERT {_ignore} INTO {self.TABLE_PREFIX}{table_name} ( "
@@ -397,9 +399,12 @@ class SQLiteAPI(MySQLite):
         :return:
         """
         _cols = []
-        if isinstance(cols, str): _cols.append(cols)
-        if isinstance(cols, (list, tuple)): [_cols.append(_) for _ in cols]
-        if not args: [_cols.append(_) for _ in args]
+        if isinstance(cols, str):
+            _cols.append(cols)
+        if isinstance(cols, (list, tuple)):
+            [_cols.append(_) for _ in cols]
+        if not args:
+            [_cols.append(_) for _ in args]
         return self._select(table, _cols, result_type=result_type, **kwargs)
 
     def update(self, table, where_key, where_value, **kwargs):
@@ -442,7 +447,7 @@ class SQLiteAPI(MySQLite):
 
 
 if __name__ == '__main__':
-    logger.addHandler(consle_handler)  #
+    logger.addHandler(console_handler)  #
 
     a = SQLiteAPI('./sup/test.db')
     a.create_table('test2', 'id int unique, name varchar(100)', ignore_exists=True)
