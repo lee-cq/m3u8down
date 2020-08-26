@@ -1,12 +1,12 @@
 cd %~dp0
 
-:: æœ¬åœ°æ„å»º - ä¾èµ– : setuptools wheel 
-:: setup.pyæ–‡ä»¶ç¼–å†™è¯¦è§ - 
+:: ±¾µØ¹¹½¨ - ÒÀÀµ : setuptools wheel 
+:: setup.pyÎÄ¼ş±àĞ´Ïê¼û - 
 python setup.py sdist bdist_wheel
 
-:: ä¸Šä¼ åŒ… -- ä¾èµ– : python -m pip install --upgrade twine
-:: ç”¨æˆ·åå¯†ç åœ¨ home\.pypirc æ²¡æœ‰æ‰‹åŠ¨
-
+:: ÉÏ´«°ü -- ÒÀÀµ : python -m pip install --upgrade twine
+:: ÓÃ»§ÃûÃÜÂëÔÚ home\.pypirc Ã»ÓĞÊÖ¶¯
+pause °´ÈÎÒâ¼üÉÏ´«µ½ pypi ...
 python -m twine upload dist/*
 
 pause

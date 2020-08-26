@@ -7,16 +7,15 @@ Setup module for core.
 @Author     : LeeCQ
 @Date-Time  : 2020/7/30 11:42
 """
-import logging
 import os
 import platform
 from setuptools import setup, find_packages
 
-PACKAGE = "m3u8Download"
+PACKAGE = "m3u8down"
 DESCRIPTION = "Download a m3u8 video."
 AUTHOR = "Lee CQ"
 AUTHOR_EMAIL = "lee-cq@qq.com"
-# URL = "null"
+URL = "https://leecq.coding.net/public/python/m3u8Down/git/files"
 
 TOPDIR = os.path.dirname(__file__) or "."
 VERSION = __import__(PACKAGE).__version__
@@ -32,7 +31,7 @@ setup_args = {
     'author': AUTHOR,
     'author_email': AUTHOR_EMAIL,
     'license': "Apache License 2.0",
-    # 'url': URL,
+    'url': URL,
     'keywords': ["m3u8", "download", "video"],
     'packages': find_packages(exclude=["tests*"]),
     # 'package_data': {'aliyunsdkcore': ['data/*.json', '*.pem', "vendored/*.pem"],
@@ -50,4 +49,4 @@ setup_args = {
     ]
 }
 
-setup(name='m3u8-down', **setup_args)
+setup(name=PACKAGE, **setup_args)

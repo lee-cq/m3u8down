@@ -27,6 +27,15 @@ v5: [F]优化解码位置，下载文件时，把KEY文件也下载到源文件�
     [T]可以指定m3u8文件夹的目录
     [T]在下载未完成前合并的问题。
 
+    [T]修复合并文件时, 先进行0文件合并问题     -- ok 2020/7/30
+    [T]修复下载溢出问题                 -- ok 2020/7/30
+    [T]修复无Key报错的问题          -- ok 2020/7/31
+    [T]修复segment解析不完全时, 不能重新解析的问题 -- ok 2020/7/31
+
+    [ ] 是否保证视频的完整性
+    [ ] 完整性达到多少达标 %
+
+
 """
 import logging
 import os  # 系统相关组件
@@ -39,14 +48,13 @@ import requests
 import urllib3
 from Crypto.Cipher import AES  # 解码器AES
 from sqlite3 import OperationalError, Binary
-from m3u8Download.SQL import SQLiteAPI  # SQLite数据库操作 -- 自定义
+from sqllib import SQLiteAPI  # SQLite数据库操作 -- 自定义
 
 logger = logging.getLogger("logger")  # 创建实例
 formatter = logging.Formatter("[%(asctime)s] < %(funcName)s: %(lineno)d > [%(levelname)s] %(message)s")
 # 终端日志
 consle_handler = logging.StreamHandler(sys.stdout)
 consle_handler.setFormatter(formatter)  # 日志文件的格式
-logger.setLevel(logging.INFO)  # 设置日志文件等级
 
 __all__ = ['M3U8', 'M3U8Error', 'M3U8KeyError', 'PlayListError', 'HTTPGetError']
 
@@ -66,10 +74,8 @@ class PlayListError(M3U8Error):
 class M3U8KeyError(PlayListError):
     """Key错误"""
 
-
-_media_format = {'mp4': ['MPEG', 'MPG'],
-                 '3gp': None,
-                 }
+class ModuleNotRealize:
+    """方法未实现"""
 
 
 class RequestsSession:
@@ -285,9 +291,10 @@ class M3U8:
 
     def segments_keys(self, keys: list) -> dict:
         """下载并构建KEY"""
-        if not keys:
+        if keys[0] is None:
             return dict()
         logger.info(f"m3u8视频已加密，正在下载并构建Key ...")
+        logger.debug(keys)
         _dic = dict()
         for k in keys:
             if k is not None:
@@ -313,7 +320,7 @@ class M3U8:
         keys = self.segments_keys(_m3u8.keys)
         __segments = _m3u8.segments
         for _ in __segments:
-            key = keys.get(_.key.absolute_uri) if _.key else None
+            key = keys.get(_.key.absolute_uri) if _.key else b''
             method = _.key.method if _.key else None
             iv = _.key.iv if _.key else None
             _is_m3u8 = _.absolute_uri.split('?')[0].split('.')[-1].upper()
@@ -324,9 +331,9 @@ class M3U8:
                                                                                                                '0') + '.ts',
                             duration=_.duration,
                             key=Binary(self.key) if self.key is not None else Binary(key),
-                            key_name=None if _is_m3u8 == "M3U8" else 'key' + f'{__segments.index(_)}'.rjust(4,
-                                                                                                            '0') + '.key',
-                            key_uri=None if _is_m3u8 == "M3U8" else _.key.absolute_uri,
+                            key_name=None if _is_m3u8 == "M3U8" or _.key is None else \
+                                'key' + f'{__segments.index(_)}'.rjust(4, '0') + '.key',
+                            key_uri=None if _is_m3u8 == "M3U8" or _.key is None else _.key.absolute_uri,
                             method=method,
                             iv=iv
                             )
@@ -355,7 +362,7 @@ class M3U8:
                 if table_name not in self.sql.show_tables(name_only=True):
                     self.sql_create_segments(table_name)
                     self.sql.insert(table_name, idd=0, abs_uri=_uri, segment_name='index.m3u8')
-                    self.sql.insert('config', key_=table_name + '_uri', value_=_uri)
+                    self.sql.insert('config', key_=table_name + '_uri', value_=_uri, ignore_repeat=True)
                     self.m3u8_segments(_m3u8, table_name)
                     break
 
@@ -418,20 +425,28 @@ class M3U8:
             f.write(_ts)
             self.tmp_down_count += 1
 
+    def ts_is_down(self):
+        pass
+
     def ts_index(self):
         """启用多线程下载"""
         print('\n')
         logger.info('尝试下载视频块文件...')
-        if not [_ for _ in self.sql.show_tables() if _.startswith('segment')]:
-            raise M3U8Error
-        for _name in [_ for _ in self.sql.show_tables() if _.startswith('segment')]:
+        exists_tables = [_ for _ in self.sql.show_tables() if _.startswith('segment')]
+        if not exists_tables:
+            raise OperationalError('你要找的表不存在 ... segment_')
+        for _name in exists_tables:
             _part_dir = os.path.join(self.m3u8_root_dir, _name)
             os.makedirs(_part_dir, exist_ok=True)
             down_list = self.sql.select(_name, '*', result_type=dict, ORDER='idd')
             self.tmp_down_count, total = len(os.listdir(_part_dir)), len(down_list)
+            if total <= 2:
+                self.sql.drop_table(_name)
+                logger.error(f'表解析错误 {_name}')
+                raise M3U8Error('表解析错误 ...')
             logger.info(f'查询到{total}个元素, 即将下载...')  #
             for segInfo in down_list:
-                if os.path.exists(os.path.join(_part_dir, segInfo['abs_uri'][segInfo['abs_uri'].rfind('/') + 1:])):
+                if os.path.exists(os.path.join(_part_dir, segInfo['segment_name'])):
                     continue
                 # self.ts_down(segInfo, _part_dir)  # 单线程测试
                 threading.Thread(target=self.ts_down, args=(segInfo, _part_dir)).start()  # 启用多线程
@@ -440,6 +455,7 @@ class M3U8:
                 print('\r已下载: ', self.tmp_down_count, '/', total, f'线程数：{threading.active_count()}', end='')
             while threading.active_count() > 1:
                 time.sleep(1)  # 等待子线程IO结束
+        print('\n下载完成 ...')
 
     @staticmethod
     def combine_winCopy(segments, out_file):
@@ -468,26 +484,31 @@ class M3U8:
         # final_clip = concatenate_videoclips(video_list)  # 进行视频合并
         # final_clip.to_videofile(out_file, fps=24, remove_temp=True)  # 将合并后的视频输出
         # ========================================================
+        raise ModuleNotFoundError
 
     def combine_ffmpeg(self, segments, out_file):
         """使用ffmpeg合并文件"""
 
+    def combine_is_ok(self, db_s, dir_s):
+        """判断数据完整性"""
+        if db_s <= 2 or not dir_s - 1 >= db_s:
+            logger.error(f'(文件: {dir_s} 数据库{db_s})')
+            raise FileNotFoundError(f"ts文件下载不完全 ... ")
+
     def combine_index(self):
         """合并下载的内容"""
-        print('\n')
         logger.info(f'尝试合并 ...')
         segments_name = [i[0] for i in self.sql.select('segment_0', 'segment_name', ORDER='idd')
                          if i[0] is not None and i[0].endswith('ts')
-                         ]
-        dir_root = os.path.abspath(self.out_path)
-        # print(segments_name, len(segments_name))
-
+                         ]  # 数据库文件列表
+        dir_root = os.path.abspath(self.out_path)  # 根文件夹
+        dir_files = os.listdir(os.path.join(dir_root, self.save_name, "segment_0"))  # 下载文件列表
+        logger.debug(f'(文件: {len(dir_files)} 数据库{len(segments_name)})')
+        self.combine_is_ok(len(segments_name), len(dir_files))
+        # assert len(dir_files) - 1 != len(segments_name), FileNotFoundError()
         files = [os.path.join(dir_root, self.save_name, "segment_0", _.split('/')[-1])
                  for _ in segments_name
                  ]  # 构建文件列表的绝对路径
-        if len(files) != len(segments_name):
-            print(f'(文件: {len(files)} 数据库{len(segments_name)})')
-            raise FileNotFoundError(f"ts文件下载不完全  ... ")
         newFile = os.path.join(dir_root, self.fileName + ".mp4")  # 构建输出文件的绝对路径
         self.combine_winCopy(segments=files, out_file=newFile)
 
@@ -501,7 +522,7 @@ class M3U8:
         shutil.rmtree(os.path.join(self.out_path, self.save_name), ignore_errors=True)
         # os.rmdir(os.path.join(self.out_path, self.save_name))
 
-    def run(self, clear=False):
+    def run(self, clear=False, is_combine=True):
         """运行"""
         # self.m3u8_index(self.input_url)   # 解析
         # if self.is_out_json: self.m3u8_outJson()
@@ -511,14 +532,17 @@ class M3U8:
         while _n:
             _n -= 1
             try:
+                if is_combine is False:
+                    raise M3U8Error(f"{is_combine=}")
                 self.combine_index()
+                print("** OK - 合并完成 ...")
                 break
             except (M3U8Error, FileNotFoundError, OperationalError) as e:
-                logger.info(f'合并文件失败,{e}...')
+                logger.info(f'合并文件失败, {e}...')
                 try:
                     self.ts_index()
-                except (M3U8Error, OperationalError, FileNotFoundError):
-                    logger.info('文件下载失败, 可能解析有问题 ...')
+                except (M3U8Error, OperationalError, FileNotFoundError) as ee:
+                    logger.info(f'文件下载失败, 可能解析有问题, {ee}..')
                     self.m3u8_index(self.input_url)
                 except Exception as e:
                     raise e
@@ -527,34 +551,11 @@ class M3U8:
 
 
 if __name__ == '__main__':
-    logger.addHandler(consle_handler)  # 添加控制台
-    db_ = r'C:\code\Py\HTTP\Download_m3u8\down\test\m3u8Info.db'
-    cookie = {
-        'Hm_lpvt_7640497445529879f7be1821661cc9e3': '1595665133',
-        'Hm_lvt_7640497445529879f7be1821661cc9e3': '1595474328, 1595492345, 1595590328, 1595605143',
-        'access_token': 'eyJhbGciOiJSUzI1NiIsImtpZCI6IjhFNDhBQ0UwNjcwNkVDQkZCNjc1M0NDM0NCMDNEMjk2ODUzMTY2QUEiLCJ0eXAiOiJKV1QiLCJ4NXQiOiJqa2lzNEdjRzdMLTJkVHpEeXdQU2xvVXhacW8ifQ',
-        'ckCsrfToken': 'N98PG8hyFhMoMW4f60qwuiWZ6KzElQ0iAijt7h3P'
-    }
-
-    # if os.path.exists(db_): os.remove(db_)
-    m = M3U8(
-        'https://1400200613.vod2.myqcloud.com/d3af585bvodtranscq1400200613/cde3cdb15285890804973367404/drm/v.f230.m3u8?t=5f1e9f49&us=dhmm1ff8&sign=df7ab4b9206851fe57974ee354c6f511',
-        local_root=r'C:\Users\LCQ\Desktop\m3u8',
-        save_name='WEB测试1',
-        debug_level=5,
-        key='./sup/GetKey',
-        threads=5
-    )
-    # m.client_setCookie('Hm_lpvt_7640497445529879f7be1821661cc9e3', str(int(time.time())))
-    # m.client_setCookie('Hm_lvt_7640497445529879f7be1821661cc9e3', '1595474328, 1595492345, 1595590328, 1595605143')
-    # m.client_setCookie('access_token',
-    #                    'eyJhbGciOiJSUzI1NiIsImtpZCI6IjhFNDhBQ0UwNjcwNkVDQkZCNjc1M0NDM0NCMDNEMjk2ODUzMTY2QUEiLCJ0eXAiOiJKV1QiLCJ4NXQiOiJqa2lzNEdjRzdMLTJkVHpEeXdQU2xvVXhacW8ifQ')
-    # m.client_setCookie('ckCsrfToken', 'N98PG8hyFhMoMW4f60qwuiWZ6KzElQ0iAijt7h3P'
-    #                    )
-
-    m.run()
-    # m.clear_index()
-    # a = m.requests_get(
-    #     'https://www.atstudy.com/api/courseMedia/GetKey?edk=CiCDZvMRFr2%2BecDRB9d%2Bzli%2BZhrnF%2BRu5zQ5oAWTnqYFiRCO08TAChiaoOvUBCokZGVkZmJkYjQtNDdhYy00NDQxLTkxYzMtYWY3NTQ3ZTgzZTZm&fileId=5285890804973367404&keySource=VodBuildInKMS')
-    # with open('./sup/key', 'wb') as f:
-    #     f.write(a.content)
+    logger.setLevel(logging.DEBUG)  # 设置日志文件等级
+    logger.addHandler(consle_handler)
+    # raise SystemExit('不要直接使用此脚本直接运行')
+    url = 'https://www.gentaji.com:65/20200325/DFlLDzaH/1200kb/hls/index.m3u8'
+    M3U8(url,
+         local_root='C:/Users/LCQ/Desktop',
+         save_name='m3u8-test'
+         ).run()

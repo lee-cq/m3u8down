@@ -2,3 +2,6 @@ m3u8>=0.7.0
 requests>=2.22.0
 urllib3>=1.25.8
 pycryptodome>=3.9.6
+sqllib>=0.2.5
+
+setuptools~=49.2.0
