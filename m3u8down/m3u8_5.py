@@ -53,8 +53,8 @@ from sqllib import SQLiteAPI  # SQLite数据库操作 -- 自定义
 logger = logging.getLogger("logger")  # 创建实例
 formatter = logging.Formatter("[%(asctime)s] < %(funcName)s: %(lineno)d > [%(levelname)s] %(message)s")
 # 终端日志
-consle_handler = logging.StreamHandler(sys.stdout)
-consle_handler.setFormatter(formatter)  # 日志文件的格式
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(formatter)  # 日志文件的格式
 
 __all__ = ['M3U8', 'M3U8Error', 'M3U8KeyError', 'PlayListError', 'HTTPGetError']
 
@@ -73,6 +73,7 @@ class PlayListError(M3U8Error):
 
 class M3U8KeyError(PlayListError):
     """Key错误"""
+
 
 class ModuleNotRealize:
     """方法未实现"""
@@ -132,6 +133,7 @@ class M3U8:
                  strict_mode=True, is_out_json=True, key=''
                  ):
         """
+        :type key: object
         :param url_m3u8: str - 需要下载的M3U8地址。
         :param verify: bool - HTTP安全验证
         :param retry: int - HTTP请求失败重试
@@ -185,7 +187,7 @@ class M3U8:
               "resolution   int, "  # 长 * 宽
               "audio        varchar(100) "
               )
-        return self.sql.create_table(table_name='master', keys=_c, ignore_exists=True)
+        return self.sql.create_table(table_name='master', cmd=_c, exists_ok=True)
 
     def sql_create_segments(self, table_name):
         """创建表: segments"""
@@ -199,13 +201,13 @@ class M3U8:
               "method   varchar(10), "
               "iv       varchar(50)"
               )
-        self.sql.create_table(table_name=table_name, keys=_c, ignore_exists=True)
+        self.sql.create_table(table_name=table_name, cmd=_c, exists_ok=True)
         # self.sql.write_db(f"UPDATE sqlite_sequence SET seq=0 WHERE name=`{table_name}`")
 
     def sql_create_config(self):
         """创建表 - 配置文件"""
         _c = "key_ varchar(50) not null unique, value_ VARCHAR(100)"
-        return self.sql.create_table(table_name='config', keys=_c, ignore_exists=True)
+        return self.sql.create_table(table_name='config', cmd=_c, exists_ok=True)
 
     def config_init(self):
         """ 配置文件初始化 """
@@ -238,33 +240,33 @@ class M3U8:
         self.client.cookies.set(name, value, **kwargs)
 
     # http请求入口
-    def __requests_get(self, url: str, header: dict):
+    def __requests_get(self, _url: str, header: dict):
         """http请求入口"""
         n, _e = self.retry, ''
         while n:
             n -= 1
             try:
-                _data = self.client.get(url=url, headers=header, timeout=self.timeout)
+                _data = self.client.get(url=_url, headers=header, timeout=self.timeout)
                 if _data.status_code == 200:
                     if self.debug_level > 2:
-                        logger.debug(f'HTTP正常返回 [200]: {url}')
+                        logger.debug(f'HTTP正常返回 [200]: {_url}')
                     return _data
                 else:
                     _e += f'[STATUS_CODE: {_data.status_code}]'
                     if self.debug_level > 2:
-                        logger.warning(f'HTTP异常返回 [{_data.status_code}]: {url}')
+                        logger.warning(f'HTTP异常返回 [{_data.status_code}]: {_url}')
             except Exception as e:
                 _e += f'[Exception: {e}]'
                 logger.warning(f'HTTP请求异常: {sys.exc_info()}')
         time.sleep(2)
-        logger.error(f'经过{self.retry}次尝试依旧失败。{_e}: {url}')
+        logger.error(f'经过{self.retry}次尝试依旧失败。{_e}: {_url}')
         if self.strictMode:
             raise HTTPGetError(f'')
         return -1
 
-    def requests_get(self, url: str):
+    def requests_get(self, _url: str):
         """对外接口"""
-        return self.__requests_get(url, header=self.header)
+        return self.__requests_get(_url, header=self.header)
 
     def m3u8_master(self, _m3u8: m3u8.M3U8, down_max=True):
         """构建master列表，调用 m3u8_index()
@@ -324,11 +326,10 @@ class M3U8:
             method = _.key.method if _.key else None
             iv = _.key.iv if _.key else None
             _is_m3u8 = _.absolute_uri.split('?')[0].split('.')[-1].upper()
-            self.sql.insert(table_name=table_name,
+            self.sql.insert(table=table_name,
                             ignore_repeat=True,
                             abs_uri=_.absolute_uri,
-                            segment_name=None if _is_m3u8 == "M3U8" else 'ts' + f'{__segments.index(_)}'.rjust(4,
-                                                                                                               '0') + '.ts',
+                            segment_name=None if _is_m3u8 == "M3U8" else 'ts' + f'{__segments.index(_)}'.rjust(4, '0') + '.ts',
                             duration=_.duration,
                             key=Binary(self.key) if self.key is not None else Binary(key),
                             key_name=None if _is_m3u8 == "M3U8" or _.key is None else \
@@ -392,10 +393,12 @@ class M3U8:
     def decode_AES128(data: bytes, key, iv='') -> bytes:
         """AES128解密"""
         if iv:
-            ASE128 = AES.new(key if isinstance(key, bytes) else bytes(key, encoding='utf8'), AES.MODE_CBC,
+            ASE128 = AES.new(key if isinstance(key, bytes) else bytes(key, encoding='utf8'),
+                             AES.MODE_CBC,
                              bytes(iv[-16:], encoding='utf8'))
         else:
-            ASE128 = AES.new(bytes(key, encoding='utf8'), AES.MODE_CBC)
+            ASE128 = AES.new(key if isinstance(key, bytes) else bytes(key, encoding='utf8'),
+                             AES.MODE_CBC)
         return ASE128.decrypt(data)
 
     def ts_down(self, seg: dict, _dir):
@@ -411,8 +414,8 @@ class M3U8:
         # ==============================================================
         # 加密视频解码模块
         if seg.get('method') == 'AES-128':
-            # print(seg['iv'][2:])
-            _ts = self.decode_AES128(_ts, seg['key'], seg['iv'][2:])
+            logger.debug(f'解码参数：{len(_ts)} {seg=}')
+            _ts = self.decode_AES128(_ts, seg['key'], seg['iv'][2:] if seg.get('iv') else '')
         elif seg.get('method') is None:
             pass
         # 在这里可以添加解密函数 添加的函数需要decode_开始<<<
@@ -434,7 +437,7 @@ class M3U8:
         logger.info('尝试下载视频块文件...')
         exists_tables = [_ for _ in self.sql.show_tables() if _.startswith('segment')]
         if not exists_tables:
-            raise OperationalError('你要找的表不存在 ... segment_')
+            raise OperationalError(f'你要找的表不存在 ... segment_ -> {self.sql.show_tables()}')
         for _name in exists_tables:
             _part_dir = os.path.join(self.m3u8_root_dir, _name)
             os.makedirs(_part_dir, exist_ok=True)
@@ -552,10 +555,11 @@ class M3U8:
 
 if __name__ == '__main__':
     logger.setLevel(logging.DEBUG)  # 设置日志文件等级
-    logger.addHandler(consle_handler)
+    logger.addHandler(console_handler)
     # raise SystemExit('不要直接使用此脚本直接运行')
-    url = 'https://www.gentaji.com:65/20200325/DFlLDzaH/1200kb/hls/index.m3u8'
-    M3U8(url,
-         local_root='C:/Users/LCQ/Desktop',
-         save_name='m3u8-test'
+    __url = 'https://v.baoshiyun.com/resource/media-861644078907392/lud/188ed3dfd07a44a7bf53bed61a13d841.m3u8'
+    M3U8(__url,
+         local_root='E:/Temp',
+         save_name='m3u8-test',
+         key=b'165cb2bc1c699e26'
          ).run()
