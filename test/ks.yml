@@ -1,0 +1,77 @@
+version: 1
+
+m3u8-conf:
+  save_path: D:\Temp
+  combine: true
+  transcode: true
+  threads: 20
+
+m3u8-lists:
+  # 第一章第一节 【申论】基础精讲
+  - uri: https://v.baoshiyun.com/resource/media-861644078907392/lud/188ed3dfd07a44a7bf53bed61a13d841.m3u8
+    name: 1.1.【申论】基础精讲-1
+    key: 165cb2bc1c699e26
+
+  - uri: https://v.baoshiyun.com/resource/media-861644080513024/lud/b80373efc40a4574a7370e9a26f33a01.m3u8
+    name: 1.1.【申论】基础精讲-2
+    key: 081732bb2dfde2b6
+
+  - uri: https://v.baoshiyun.com/resource/media-861644081561600/lud/672ab4cd174546f589d47bbfd6747b72.m3u8
+    name: 1.1.【申论】基础精讲-3
+    key: 0aac68f06b97d2b8
+
+  - uri: https://v.baoshiyun.com/resource/media-861644082577408/lud/93c83bee73c24510951c8c28b813a9ce.m3u8
+    name: 1.1.【申论】基础精讲-4
+    key: 9c8d907ebeb4c6bd
+
+  - uri: https://v.baoshiyun.com/resource/media-861644083036160/lud/0ecd2dc362514d369cf28eaf2092ec5c.m3u8
+    name: 1.1.【申论】基础精讲-5
+    key: b244794e3aa429ca
+
+  - uri: https://v.baoshiyun.com/resource/media-861644084150272/lud/6002cc592d4749918efe11af46fdde6e.m3u8
+    name: 1.1.【申论】基础精讲-6
+    key: 8e9c8d26d09935ee
+
+  - uri: https://v.baoshiyun.com/resource/media-861644085231616/lud/40f3a86998654ddf85c196b5096b80e9.m3u8
+    name: 1.1.【申论】基础精讲-7
+    key: 975b84ca3315ae71
+
+  # 第二章第一节【行测-判断推理】基础精讲
+  - uri: https://v.baoshiyun.com/resource/media-861644088311808/lud/445632e41ecc4c258a1fd7099ca9534f.m3u8
+    name: 2.1.【行测-判断推理】基础精讲-1
+    key: 5984b10c7ca462aa
+
+  - uri: https://v.baoshiyun.com/resource/media-861644088836096/lud/42fd8d318e914fa581a59e6c4f4f120d.m3u8
+    name: 2.1.【行测-判断推理】基础精讲-2
+    key: 6ff2a6c15ae2aabd
+
+  - uri: https://v.baoshiyun.com/resource/media-861644089950208/lud/2a733a20fc4f4797957af981db8891c9.m3u8
+    name: 2.1.【行测-判断推理】基础精讲-3
+    key: fb45ef432f81302b
+
+  - uri: https://v.baoshiyun.com/resource/media-861644090933248/lud/f1bfcbcbf2da4425a8042b69c48c4928.m3u8
+    name: 2.1.【行测-判断推理】基础精讲-4
+    key: 7acfc86138cef423
+
+  - uri: https://v.baoshiyun.com/resource/media-861644091523072/lud/2293c1fb57384a01bb4f11a395859f28.m3u8
+    name: 2.1.【行测-判断推理】基础精讲-5
+    key: 35dac39bd67747f8
+
+  # 第三章第一节 - 【行测-言语理解与表达】
+  - uri: https://v.baoshiyun.com/resource/media-861644095193088/lud/b2d2b0cc62bf4ca0ac1345c287649317.m3u8
+    name: 3.1.【行测-言语理解与表达】基础精讲-1
+    key: ff1b040cae5dfe74
+
+  - uri: https://v.baoshiyun.com/resource/media-861644095651840/lud/10db1b6bfa5f4ad3b976541e853dd5a9.m3u8
+    name: 3.1.【行测-言语理解与表达】基础精讲-2
+    key: dc923bc36a86e26f
+
+  - uri: https://v.baoshiyun.com/resource/media-861644096700416/lud/08710cb1b32d48daa14eaef6fb86efed.m3u8
+    name: 3.1.【行测-言语理解与表达】基础精讲-3
+    key: a136b600ebfe2b38
+
+  - uri: https://v.baoshiyun.com/resource/media-861644097257472/lud/0551b761d57b44c08d3555bc691dccff.m3u8
+    name: 3.1.【行测-言语理解与表达】基础精讲-4
+    key: ee9ee5d072b98fef
+
+  #

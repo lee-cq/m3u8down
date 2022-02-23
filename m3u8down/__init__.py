@@ -5,7 +5,7 @@
 @Author     : LeeCQ
 @Date-Time  : 2020/7/30 11:40
 """
-__version__ = '0.5.4'
+__version__ = '0.6.0'
 
 from .m3u8_5 import M3U8
 

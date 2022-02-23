@@ -23,7 +23,6 @@ VERSION = __import__(PACKAGE).__version__
 with open("requirements.txt") as fp:
     requires = fp.read().split('\n')
 
-
 setup_args = {
     'version': VERSION,
     'description': DESCRIPTION,
@@ -45,6 +44,9 @@ setup_args = {
         'Programming Language :: Python',
         'Programming Language :: Python :: 3.6',
         'Programming Language :: Python :: 3.7',
+        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
         'Topic :: Software Development',
     ]
 }

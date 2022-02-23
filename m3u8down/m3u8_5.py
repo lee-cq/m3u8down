@@ -32,18 +32,23 @@ v5: [F]优化解码位置，下载文件时，把KEY文件也下载到源文件�
     [T]修复无Key报错的问题          -- ok 2020/7/31
     [T]修复segment解析不完全时, 不能重新解析的问题 -- ok 2020/7/31
 
+    [T]修复空IV异常问题 -- 2022/2/19
+    [T]更新sqllib版本 -- 2022/2/19
+
     [ ] 是否保证视频的完整性
     [ ] 完整性达到多少达标 %
 
 
 """
 import logging
-import os  # 系统相关组件
+import os
 import sys
 import threading
 import time
-import pathlib
-import m3u8  # 网络相关组件
+from pathlib import Path
+
+import ffmpeg
+import m3u8
 import requests
 import urllib3
 from Crypto.Cipher import AES  # 解码器AES
@@ -79,8 +84,10 @@ class ModuleNotRealize:
     """方法未实现"""
 
 
-class RequestsSession:
-    """模拟浏览器会话"""
+class M3u8Dump:
+
+    def __init__(self, ):
+        pass
 
 
 class M3U8:
@@ -130,35 +137,47 @@ class M3U8:
 
     def __init__(self, url_m3u8: str, verify=False, retry=5, timeout=90, threads=5,
                  local_root='./down/', save_path='', save_name='', debug_level=3,
-                 strict_mode=True, is_out_json=True, key=''
+                 strict_mode=True, key: (str, bytes) = '', ffmpeg_path='ffmpeg',
+                 is_clean_m3u8=False, is_out_json=False, is_redump_m3u8=False,
+                 is_combine=True, is_transcode=False,
                  ):
         """
-        :type key: object
-        :param url_m3u8: str - 需要下载的M3U8地址。
-        :param verify: bool - HTTP安全验证
-        :param retry: int - HTTP请求失败重试
-        :param timeout: int - HTTP请求超时
-        :param threads: int - 下载ts的线城数
-        :param local_root: str - 保存的本地路径 - 及工作路径
-        :param save_name: str - 保存的文件名
-        :param debug_level: int -日志输出等级
-        :param strict_mode: bool - 严格模式，出现异常直接抛出错误
-        :param is_out_json: bool - 导出json格式的文件
+        :param url_m3u8: str        - 需要下载的M3U8地址。
+        :param verify: bool         - HTTP安全验证
+        :param retry: int           - HTTP请求失败重试
+        :param timeout: int         - HTTP请求超时
+        :param threads: int         - 下载ts的线城数
+        :param local_root: str      - 保存的本地路径 - 及工作路径
+        :param save_path: str       - local_root的别名
+        :param save_name: str       - 保存的文件名
+        :param debug_level: int     - 日志输出等级
+        :param strict_mode: bool    - 严格模式，出现异常直接抛出错误
+        :param ffmpeg_path: str     - ffmpeg 转码插件的路径
+        :param key: str or byte     - 视频解密秘钥
+        :param is_out_json: bool    - 导出json格式的文件
+        :param is_clean_m3u8: bool  - 清理M3U8
+        :param is_redump_m3u8: bool - 重写m3u8文件
+        :param is_combine: bool     - 合并M3U8文件到单一文件
+        :param is_transcode: bool   - 是否转码文件 (耗时长)
         """
-        self.save_name = save_name if save_name else url_m3u8.split('/')[-1].split('.')[0] + time.strftime(
-            '-%Y%m%d%H%M')
+        self.save_name = save_name if save_name else url_m3u8.split('/')[-1].split('.')[0] + time.strftime('-%Y%m%d%H%M')
         #
         self.input_url = url_m3u8
         self.retry, self.timeout, self.threads = retry, timeout, threads
         self.debug_level, self.strictMode = debug_level, strict_mode
+        self.ffmpeg_path = ffmpeg_path
         self.is_out_json = is_out_json
+        self.is_transcode = is_transcode
+        self.is_combine = is_combine
+        self.is_clean_m3u8 = False if is_redump_m3u8 else is_clean_m3u8
+        self.is_redump_m3u8 = is_redump_m3u8
 
         # 构建本地文件
-        self.out_path = os.path.abspath(save_path or local_root)
-        self.m3u8_root_dir = local_root + save_name if local_root.endswith('/') else local_root + '/' + save_name
-        os.makedirs(self.m3u8_root_dir, exist_ok=True)
+        self.out_path = Path(save_path or local_root).absolute()
+        self.m3u8_root_dir = self.out_path.joinpath(save_name)
+        self.m3u8_root_dir.mkdir(exist_ok=True)
         self.fileName = save_name
-        self.key = self.set_key(key) if isinstance(key, str) else key
+        self.key = bytes(self.set_key(key) if isinstance(key, str) else key, encoding='utf8')
 
         # 构建SQLite
         self.sql = SQLiteAPI(os.path.join(self.m3u8_root_dir, 'm3u8Info.db'))
@@ -168,18 +187,20 @@ class M3U8:
         self.client_set_header()
         urllib3.disable_warnings()
         #
-        self.root_m3u8 = url_m3u8[:url_m3u8.rfind('/') + 1]
+        self.m3u8_root_uri = url_m3u8[:url_m3u8.rfind('/') + 1]
         self.configuration = dict()
         self.config_init()
         self.tmp_down_count = 0
+        self.combine_file_name = ''
+        self.transcode_file_name = ''
 
     @staticmethod
     def set_key(path):
         """设置Key - AES-128"""
-        _p = pathlib.Path(path)
+        _p = Path(path)
         if _p.is_file():
             return _p.read_bytes()
-        return None
+        return path
 
     def sql_create_master(self):
         """创建表: master"""
@@ -212,7 +233,7 @@ class M3U8:
     def config_init(self):
         """ 配置文件初始化 """
         self.configuration.setdefault('inputURL', self.input_url)
-        self.configuration.setdefault('m3u8Root', self.root_m3u8)
+        self.configuration.setdefault('m3u8Root', self.m3u8_root_uri)
         self.configuration.setdefault('fileName', self.fileName)
         self.configuration.setdefault('updateTime', int(time.time()))
         self.sql_create_config()
@@ -221,13 +242,28 @@ class M3U8:
                         value_=list(self.configuration.values())
                         )
 
-    # 客户端头
+    def dump_m3u8(self, _out_dir=''):
+        """OUT"""
+        for segment_dir in self.m3u8_root_dir.iterdir():
+            if not segment_dir.name.startswith('segment_'):
+                continue
+            _m3u8_l = [_m for _m in segment_dir.iterdir() if _m.name.endswith('.m3u8')]
+            if len(_m3u8_l) == 1:
+                _m3 = _m3u8_l[0]
+            else:
+                raise M3U8Error()
+            data = m3u8.parse(_m3)
+            for i, _d in enumerate(data['segments']):
+                _ = data['segments'][i]['']
+
+        # 客户端头
+
     def client_set_header(self, header=None):
         """设值请求头"""
         if header is None:
             header = dict()
         header.setdefault("User-Agent",
-                          "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.25 Safari/537.36 Core/1.70.3741.400 QQBrowser/10.5.3863.400", )
+                          "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.25 Safari/537.36 Core/1.70.3741.400 QQBrowser/10.5.3863.400")
         header.setdefault("Accept", "*/*")
         header.setdefault("Connection", "keep-alive")
         self.header = header
@@ -309,7 +345,7 @@ class M3U8:
         包含 absolute_uri, key
         for i, _ in enumerate(a.segments):
             print(_.absolute_uri)
-            print(f'key:{_.key}, duration={_.duration}')
+            print(f' key:{_.key}, duration={_.duration}')
 
         M3U8.key是一个对象，包含[absolute_uri, iv, method, keyformat, [base_uri, keyformatversions, tag, uri]]
 
@@ -322,36 +358,27 @@ class M3U8:
         keys = self.segments_keys(_m3u8.keys)
         __segments = _m3u8.segments
         for _ in __segments:
-            key = keys.get(_.key.absolute_uri) if _.key else b''
+            key = bytes(keys.get(_.key.absolute_uri) if _.key else '', encoding='utf8')
             method = _.key.method if _.key else None
             iv = _.key.iv if _.key else None
             _is_m3u8 = _.absolute_uri.split('?')[0].split('.')[-1].upper()
-            self.sql.insert(table=table_name,
-                            ignore_repeat=True,
-                            abs_uri=_.absolute_uri,
-                            segment_name=None if _is_m3u8 == "M3U8" else 'ts' + f'{__segments.index(_)}'.rjust(4, '0') + '.ts',
-                            duration=_.duration,
-                            key=Binary(self.key) if self.key is not None else Binary(key),
-                            key_name=None if _is_m3u8 == "M3U8" or _.key is None else \
-                                'key' + f'{__segments.index(_)}'.rjust(4, '0') + '.key',
-                            key_uri=None if _is_m3u8 == "M3U8" or _.key is None else _.key.absolute_uri,
-                            method=method,
-                            iv=iv
-                            )
+            self.sql.insert(
+                table=table_name,
+                ignore_repeat=True,
+                abs_uri=_.absolute_uri,
+                segment_name=None if _is_m3u8 == "M3U8" else 'ts' + f'{__segments.index(_)}'.rjust(4, '0') + '.ts',
+                duration=_.duration,
+                key=Binary(self.key) if self.key else Binary(key),
+                key_name=None if _is_m3u8 == "M3U8" or _.key is None else 'key' + f'{__segments.index(_)}'.rjust(4, '0') + '.key',
+                key_uri=None if _is_m3u8 == "M3U8" or _.key is None else _.key.absolute_uri,
+                method=method,
+                iv=iv
+            )
             # print(_.absolute_uri, _.duration, _.key.absolute_uri,)
 
     # 解析初始化，调度解析状态
     def m3u8_index(self, _uri):
         """解析初始化，调度解析方式"""
-        # ==========================================================
-        # loads通过添加URI的方式可能会造成目录错误的
-        # ==========================================================
-        # _m3u8 = self.__requests_get(_uri, self.header)
-        # if _m3u8 is -1:
-        #     logger.error(f"M3U8文件获取失败: {self.input_url}")
-        #     raise M3U8Error(f"M3U8文件获取失败: {self.input_url}")
-        # _m3u8 = m3u8.loads(_m3u8.text, uri=self.input_url)
-        # ==========================================================
         logger.info(f"尝试解析m3u8文件：{_uri}")
         _m3u8 = m3u8.load(_uri, timeout=60, headers=self.header)
         if _m3u8.playlists:  # 构建master列表
@@ -404,7 +431,7 @@ class M3U8:
     def ts_down(self, seg: dict, _dir):
         """下载ts文件
 
-        :argument seg: 一个包含块信息的字典
+        :argument seg: 一个包含块信息的字典，该字典存在于数据库，是ts的一行
         :argument _dir:
         """
         try:
@@ -414,7 +441,7 @@ class M3U8:
         # ==============================================================
         # 加密视频解码模块
         if seg.get('method') == 'AES-128':
-            logger.debug(f'解码参数：{len(_ts)} {seg=}')
+            logger.debug(f'解码参数：body_len: {len(_ts)} 参数：{seg}')
             _ts = self.decode_AES128(_ts, seg['key'], seg['iv'][2:] if seg.get('iv') else '')
         elif seg.get('method') is None:
             pass
@@ -422,8 +449,7 @@ class M3U8:
         # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
         # ==============================================================
         fileName = seg['segment_name']
-        filePath = os.path.join(_dir, fileName) if not seg['abs_uri'].endswith('m3u8') else os.path.join(_dir,
-                                                                                                         'index.m3u8')
+        filePath = os.path.join(_dir, fileName) if not seg['abs_uri'].endswith('m3u8') else os.path.join(_dir, 'index.m3u8')
         with open(filePath, 'wb') as f:
             f.write(_ts)
             self.tmp_down_count += 1
@@ -439,8 +465,8 @@ class M3U8:
         if not exists_tables:
             raise OperationalError(f'你要找的表不存在 ... segment_ -> {self.sql.show_tables()}')
         for _name in exists_tables:
-            _part_dir = os.path.join(self.m3u8_root_dir, _name)
-            os.makedirs(_part_dir, exist_ok=True)
+            _part_dir = self.m3u8_root_dir.joinpath(_name)
+            _part_dir.mkdir(exist_ok=True)
             down_list = self.sql.select(_name, '*', result_type=dict, ORDER='idd')
             self.tmp_down_count, total = len(os.listdir(_part_dir)), len(down_list)
             if total <= 2:
@@ -449,7 +475,7 @@ class M3U8:
                 raise M3U8Error('表解析错误 ...')
             logger.info(f'查询到{total}个元素, 即将下载...')  #
             for segInfo in down_list:
-                if os.path.exists(os.path.join(_part_dir, segInfo['segment_name'])):
+                if _part_dir.joinpath(segInfo['segment_name']).exists():
                     continue
                 # self.ts_down(segInfo, _part_dir)  # 单线程测试
                 threading.Thread(target=self.ts_down, args=(segInfo, _part_dir)).start()  # 启用多线程
@@ -460,8 +486,7 @@ class M3U8:
                 time.sleep(1)  # 等待子线程IO结束
         print('\n下载完成 ...')
 
-    @staticmethod
-    def combine_winCopy(segments, out_file):
+    def combine_winCopy(self, segments, out_file):
         """使用Windows的cmd命令 copy /b 进行合并"""
         len_files = len(segments)
         with open(out_file, 'wb') as nf:
@@ -469,15 +494,14 @@ class M3U8:
                 print(f'\r已合并{i + 1}/{len_files}', end='')
                 with open(file, 'rb') as of:
                     nf.write(of.read())
-        # =====================================================
-        # 下面的方法存在问题文件排序的问题，不好解决, 而且不具有跨平台的兼容性
-        # =====================================================
-        #     os.popen(f'copy /b {newFile}+{os.path.join(dir_root, "segment_0", file)} '
-        #              f'{newFile}').read()
-        # =====================================================
+        if os.path.exists(out_file):
+            self.combine_file_name = out_file
+            return out_file
+        else:
+            raise FileNotFoundError(f'未找到可用的合并后的文件： {out_file}')
 
     def combine_moviePy(self, segments, out_file):
-        """通过moviePy合并文件"""
+        """通过moviePy合并文件 未实现"""
         # ========================================================
         # 此方法合并大视频内容的时候会造成内存溢出，而导致系统崩溃。
         # ========================================================
@@ -487,12 +511,20 @@ class M3U8:
         # final_clip = concatenate_videoclips(video_list)  # 进行视频合并
         # final_clip.to_videofile(out_file, fps=24, remove_temp=True)  # 将合并后的视频输出
         # ========================================================
-        raise ModuleNotFoundError
+        raise NotImplementedError()
 
-    def combine_ffmpeg(self, segments, out_file):
-        """使用ffmpeg合并文件"""
+    def transcode_ffmpeg(self, in_file, out_file):
+        """使用ffmpeg转码文件
 
-    def combine_is_ok(self, db_s, dir_s):
+        :param in_file: 完整的转码前的文件路径
+        :param out_file：输出文件路径
+        """
+        logger.info('转码文件 ... ')
+
+        ffmpeg.input(in_file).output(out_file).run(cmd=self.ffmpeg_path, overwrite_output=True)
+
+    @staticmethod
+    def combine_is_ok(db_s, dir_s):
         """判断数据完整性"""
         if db_s <= 2 or not dir_s - 1 >= db_s:
             logger.error(f'(文件: {dir_s} 数据库{db_s})')
@@ -501,6 +533,7 @@ class M3U8:
     def combine_index(self):
         """合并下载的内容"""
         logger.info(f'尝试合并 ...')
+        # TODO Bug
         segments_name = [i[0] for i in self.sql.select('segment_0', 'segment_name', ORDER='idd')
                          if i[0] is not None and i[0].endswith('ts')
                          ]  # 数据库文件列表
@@ -512,7 +545,7 @@ class M3U8:
         files = [os.path.join(dir_root, self.save_name, "segment_0", _.split('/')[-1])
                  for _ in segments_name
                  ]  # 构建文件列表的绝对路径
-        newFile = os.path.join(dir_root, self.fileName + ".mp4")  # 构建输出文件的绝对路径
+        newFile = os.path.join(dir_root, self.fileName + ".ts")  # 构建输出文件的绝对路径
         self.combine_winCopy(segments=files, out_file=newFile)
 
     def clear_index(self):
@@ -536,9 +569,14 @@ class M3U8:
             _n -= 1
             try:
                 if is_combine is False:
-                    raise M3U8Error(f"{is_combine=}")
+                    raise M3U8Error(f"参数取消合并，{is_combine}")
                 self.combine_index()
                 print("** OK - 合并完成 ...")
+                if self.is_transcode:
+                    self.transcode_ffmpeg(self.combine_file_name,
+                                          os.path.join(os.path.abspath(self.out_path),
+                                                       self.fileName + '.mp4')
+                                          )
                 break
             except (M3U8Error, FileNotFoundError, OperationalError) as e:
                 logger.info(f'合并文件失败, {e}...')
@@ -557,9 +595,11 @@ if __name__ == '__main__':
     logger.setLevel(logging.DEBUG)  # 设置日志文件等级
     logger.addHandler(console_handler)
     # raise SystemExit('不要直接使用此脚本直接运行')
-    __url = 'https://v.baoshiyun.com/resource/media-861644078907392/lud/188ed3dfd07a44a7bf53bed61a13d841.m3u8'
+    __url = 'https://videos3.naibago.com/20210306/1pondo-092515_160/index.m3u8'
     M3U8(__url,
          local_root='E:/Temp',
-         save_name='m3u8-test',
-         key=b'165cb2bc1c699e26'
+         save_name='一本道092515-160 巨乳マニア 清水理紗',
+         # key='165cb2bc1c699e26',
+         is_transcode=True,
+         threads=30,
          ).run()

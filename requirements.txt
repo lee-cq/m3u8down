@@ -3,7 +3,7 @@ requests>=2.22.0
 urllib3>=1.25.8
 pycryptodome>=3.9.6
 sqllib>=0.2.5
-
+ffmpeg-python~=0.2.0
 dbutils==3.0.2
 pymysql>=1.0.2
 

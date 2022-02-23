@@ -9,12 +9,16 @@
 
 
 class M3U8Error(Exception):
-    pass
+    """M3U8基础错误"""
+
+
+class M3U8IOError(M3U8Error):
+    """M3U8网络错误"""
 
 
 class RetryError(M3U8Error):
-    pass
+    """重试异常"""
 
 
 class NotFindDir(M3U8Error):
-    pass
+    """目录没找到"""
