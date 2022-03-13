@@ -355,10 +355,14 @@ class M3U8:
         :return: 0
         """
         logger.info("正在解析Segments ...")
-        keys = self.segments_keys(_m3u8.keys)
+        if not self.key:
+            keys = self.segments_keys(_m3u8.keys)
+        else:
+            keys = {}
+
         __segments = _m3u8.segments
         for _ in __segments:
-            key = bytes(keys.get(_.key.absolute_uri) if _.key else '', encoding='utf8')
+            key = self.key or bytes(keys.get(_.key.absolute_uri, '') if _.key else '', encoding='utf8')
             method = _.key.method if _.key else None
             iv = _.key.iv if _.key else None
             _is_m3u8 = _.absolute_uri.split('?')[0].split('.')[-1].upper()
@@ -570,6 +574,8 @@ class M3U8:
             try:
                 if is_combine is False:
                     raise M3U8Error(f"参数取消合并，{is_combine}")
+                if self.out_path.joinpath(self.fileName + '.ts').exists():
+                    raise FileExistsError(f'文件已经存在')
                 self.combine_index()
                 print("** OK - 合并完成 ...")
                 if self.is_transcode:
@@ -592,7 +598,7 @@ class M3U8:
 
 
 if __name__ == '__main__':
-    logger.setLevel(logging.DEBUG)  # 设置日志文件等级
+    logger.setLevel(logging.INFO)  # 设置日志文件等级
     logger.addHandler(console_handler)
     # raise SystemExit('不要直接使用此脚本直接运行')
     __url = 'https://videos3.naibago.com/20210306/1pondo-092515_160/index.m3u8'

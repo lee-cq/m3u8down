@@ -26,17 +26,19 @@ _args.add_argument('-v', '--version', action='version', version='0.5.5')
 _a0 = ['-h']
 _a1 = ['-u', 'https://v.baoshiyun.com/resource/media-861644078907392/lud/188ed3dfd07a44a7bf53bed61a13d841.m3u8',
        '-n', '【申论】基础精讲-1',
+       '-o', r'D:/Temp',
        '-k', '165cb2bc1c699e26',
        '-t', '20', ]
 
 if __name__ == '__main__':
-    logger.setLevel(logging.INFO)  # 设置日志文件等级
+    logger.setLevel(logging.DEBUG)  # 设置日志文件等级
     logger.addHandler(console_handler)
     args = _args.parse_args(_a1)
 
     out_path = Path(args.out_path).absolute()
     logger.info(f'下载：{args.uri}')
     logger.info(f'保存至：{out_path}')
+    logger.debug(f'{args=}')
 
     M3U8(url_m3u8=args.uri,
          save_name=args.name,

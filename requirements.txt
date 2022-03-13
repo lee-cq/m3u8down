@@ -8,3 +8,4 @@ dbutils==3.0.2
 pymysql>=1.0.2
 
 setuptools~=49.2.0
+httpx~=0.22.0
