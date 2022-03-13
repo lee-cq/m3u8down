@@ -5,11 +5,12 @@
 @Author     : LeeCQ
 @Date-Time  : 2022/2/26 18:12
 """
+import time
 from pathlib import Path
 from sqllib import SQLiteAPI
 from sqllib.common.error import SqlWriteError
 
-from m3u8down.small_tools import sum_prefix_md5
+from m3u8down.small_tools import sum_prefix_md5, logger
 
 
 class M3U8SQL(SQLiteAPI):
@@ -19,11 +20,12 @@ class M3U8SQL(SQLiteAPI):
     :param m3u8_uri - 需要下载的M3U8的网络路径
     :param m3u8_name - 希望保存在本地的名字
     :param prefix - 计算好的前缀
+    :param save_path - M3U8的保存位置
     """
     _db = Path(__file__).parent.joinpath('.m3u8DownInfo.db')
     prefix_map_name = 'prefix_map'
 
-    def __init__(self, db=None, m3u8_uri=None, m3u8_name=None, save_path='', prefix=None, **kwargs):
+    def __init__(self, db=None, m3u8_uri=None, m3u8_name=None, base_path='', prefix=None, **kwargs):
 
         if db:
             db = Path(db)
@@ -31,13 +33,14 @@ class M3U8SQL(SQLiteAPI):
 
         self.m3u8_name = m3u8_name
         self.m3u8_uri = m3u8_uri
-        self.base_path = Path(save_path) or self._db.parent
-        self.save_path = self.base_path.joinpath(self.m3u8_name)
+        self.base_path = Path(base_path) if base_path else self._db.parent
+
         self._kwargs = kwargs
 
         self.no_prefix_api = SQLiteAPI(self._db, **kwargs)
         self.prefix = prefix or self.make_prefix()
         self._create_prefix_table()
+        super().__init__(self._db, prefix=self.prefix, **kwargs)
 
         if prefix and prefix not in self.prefixes_list:
             raise NotImplementedError("指定的前缀在库中不存在！")
@@ -49,7 +52,13 @@ class M3U8SQL(SQLiteAPI):
         else:
             self.is_new = False
 
-        super().__init__(self._db, prefix=self.prefix, **kwargs)
+    @property
+    def save_path(self):
+        try:
+            return Path(self.prefix_map_select('save_path', WHERE=f'`prefix_md5`="{self.prefix}"')[0][0])
+        except Exception as _e:
+            logger.error(f'{_e}', exc_info=_e)
+            return self.base_path.joinpath(self.m3u8_name)
 
     def make_prefix(self):
         """创建并插入前缀"""
@@ -58,7 +67,7 @@ class M3U8SQL(SQLiteAPI):
         if not self.m3u8_name:
             return ''  # 全部参数为空的时候返回一个空前缀的对象
 
-        return sum_prefix_md5(self.m3u8_uri, self.save_path)
+        return sum_prefix_md5(self.m3u8_uri, self.base_path.joinpath(self.m3u8_name))
 
     @property
     def prefixes_list(self) -> list:
@@ -67,12 +76,13 @@ class M3U8SQL(SQLiteAPI):
 
     def _insert_prefix(self):
         """FIXME"""
-        self._create_prefix_table()
         _s = self.prefix_map_install(
             prefix_md5=self.prefix,
             m3u8_uri=self.m3u8_uri,
             m3u8_name=self.m3u8_name,
-            save_path=self.save_path.__str__(),
+            save_path=self.save_path.absolute().__str__(),
+            create_time=int(time.time())
+
         )
 
     def tables_name(self) -> list:
@@ -82,7 +92,7 @@ class M3U8SQL(SQLiteAPI):
     def prefix_map_update(self, **kwargs):
         return self.no_prefix_api.update(self.prefix_map_name, 'prefix_md5', self.prefix, **kwargs)
 
-    def prefix_map_install(self, ignore_repeat=False, **kwargs):
+    def prefix_map_install(self, ignore_repeat=True, **kwargs):
         return self.no_prefix_api.insert(self.prefix_map_name, ignore_repeat=ignore_repeat, **kwargs)
 
     def prefix_map_select(self, cols, *args, result_type=None, **kwargs):
@@ -100,7 +110,7 @@ class M3U8SQL(SQLiteAPI):
             "save_path VARCHAR(128) not null,           -- 下载位置 \n"
             "create_time INT ,                          -- 此条记录的创建时间\n"
             "need_combine bool ,                        -- 是否需要合并单一文件\n"
-            "combined_md5 varchar(32),                  -- 已经合并单一文件MD5值\n"  # TODO 大文件的MD5计算方法
+            "combined_md5 varchar(32),                  -- 已经合并单一文件MD5值\n"
             "need_transcode bool,                       -- 是否需要转码文件 \n"
             "transcode_args TEXT,                       -- 转码参数 JSON \n"
             "transcode_md5 varchar(32) ,                -- 转码后的文件的MD5值\n "

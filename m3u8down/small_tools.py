@@ -18,7 +18,7 @@ __all__ = ['Bytes', 'sum_prefix_md5', 'sum_file_md5', 'URLDisassemble', 'now_tim
            ]
 
 logger = logging.getLogger("logger")  # 创建实例
-formatter = logging.Formatter("[%(asctime)s] < %(funcName)s: %(lineno)d > [%(levelname)s] %(message)s")
+formatter = logging.Formatter("[%(asctime)s] < %(filename)s: %(lineno)d > [%(levelname)s] %(message)s")
 # 终端日志
 console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(formatter)  # 日志文件的格式
@@ -95,6 +95,7 @@ def now_timestamp():
 
 def decode_aes128(data: bytes, key, iv='') -> bytes:
     """AES128解密"""
+    logger.debug(f'解码AES-128： {key},  iv={iv}')
     if iv:
         ASE128 = AES.new(key if isinstance(key, bytes) else bytes(key, encoding='utf8'),
                          AES.MODE_CBC,

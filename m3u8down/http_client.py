@@ -14,11 +14,6 @@ from m3u8down.small_tools import *
 from httpx import AsyncClient, Client, Response
 
 
-def async_run(main, *, debug=None):
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main)
-
-
 class BaseHttpClient(abc.ABC):
 
     def __init__(self, retry=3):
@@ -36,25 +31,32 @@ class BaseHttpClient(abc.ABC):
         self.headers.update(header)
 
     @abc.abstractmethod
-    def get(self, *args, **kwargs):
-        """"""
+    def sync_get(self, url, **kwargs):
+        """同步Get"""
         pass
 
 
 class HttpClient(Client, BaseHttpClient):
     """客户端模组"""
 
-    def __init__(self, retry=3, follow_redirects=True, **kwargs):
-        super(HttpClient, self).__init__(follow_redirects=follow_redirects, **kwargs)
+    def __init__(self, retry=0, follow_redirects=True, **kwargs):
+        super(HttpClient, self).__init__(follow_redirects=follow_redirects,
+                                         event_hooks={
+                                             'response': [self.request_retry]
+                                         },
+                                         **kwargs)
         self.set_header()
         self.retry = retry
+
+    def sync_get(self, url, **kwargs):
+        return self.get(url, **kwargs)
 
     def m3u8_download(self, url, timeout=None, headers={}, params={}):
         """下载M3UU8文档  -
 
         :return: M3u8内容, M3u8前缀
         """
-        response = self.get(url, timeout=timeout, headers=headers, params=params)
+        response = self.get(url, timeout=timeout, headers=headers, params=params, )
         return response.text, m3u8_urljoin(str(response.url), '.')
 
     def request_retry(self, response: Response):
@@ -68,24 +70,24 @@ class HttpClient(Client, BaseHttpClient):
 
 
 class AsyncHttpClient(AsyncClient, BaseHttpClient):
-    def __init__(self, retry=3, follow_redirects=True, **kwargs):
-        super(AsyncHttpClient, self).__init__(follow_redirects=follow_redirects, **kwargs)
+    def __init__(self, retry=1, follow_redirects=True, **kwargs):
+        super(AsyncHttpClient, self).__init__(follow_redirects=follow_redirects,
+                                              event_hooks={
+                                                  'response': [self.request_retry]
+                                              }, **kwargs)
+        self.sync_client = HttpClient(retry=1, follow_redirects=follow_redirects, **kwargs)
         self.set_header()
         self.retry = retry
 
-    def m3u8_download(self, url, timeout=None, headers={}, params={}, debug=None):
+    def sync_get(self, url, **kwargs):
+        return self.sync_client.get(url, **kwargs)
+
+    def m3u8_download(self, url, timeout=None, headers={}, params={}):
         """下载M3UU8文档  -
 
         :return: M3u8内容, M3u8前缀
         """
-        _l = []
-
-        async def _down():
-            _l.append(await self.get(url, timeout=timeout, headers=headers, params=params))
-
-        async_run(_down())
-
-        response = _l[0]
+        response = self.sync_get(url, timeout=timeout, headers=headers, params=params, )
         return response.text, m3u8_urljoin(str(response.url), '.')
 
     async def request_retry(self, response: Response):
@@ -100,4 +102,3 @@ class AsyncHttpClient(AsyncClient, BaseHttpClient):
 
 if __name__ == '__main__':
     logger.addHandler(console_handler)
-
