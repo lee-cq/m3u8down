@@ -15,6 +15,7 @@ from m3u8down.m3u8_5 import logger, console_handler
 _args = ArgumentParser("M3U8Down 命令行工具")
 _args.add_argument('-u', '--uri', dest='uri', help='必要参数：需要下载的M3U8-URI')
 _args.add_argument('-n', '--name', dest='name', default=None, help='保存的名字')
+_args.add_argument('-c', '--config', dest='config_file', default=None, help='指定配置文件')
 _args.add_argument('-o', '--out-path', dest='out_path', default='.', help='本地保存路径')
 _args.add_argument('-k', '--key', dest='key', default='', help='手动指定m3u8加密秘钥')
 _args.add_argument('-nc', '--no-combine', dest='is_combine', action='store_false', default=True, help='禁止合并单一ts文件(会删除文件分片)')

@@ -8,8 +8,10 @@
 """
 
 import logging
+import threading
 
 from typing import Union
+from queue import Queue
 
 from m3u8 import M3U8 as _M3U8, Key as M3U8_Key
 
@@ -76,15 +78,18 @@ class BaseM3U8Down(M3U8):
         self.save_path = self.db.save_path
         self.save_path.mkdir(exist_ok=True, parents=True)
         self.thread = thread
-        # self.download_queue = Queue() if isinstance(http_client, Client) else asyncio.Queue()
 
-    # @abc.abstractmethod
-    # def http_get(self, url, **kwargs):
-    #     """同步的HTTP GET"""
+    def download_queue(self):
+        logger.debug(f'准备多线程下载队列')
+        _queue = Queue() if isinstance(self.http_client, Client) else asyncio.Queue()
+        [_queue.put_nowait(_) for _ in enumerate(self.segments)]
+        logger.info(f'协程队列已创建，共计{_queue.qsize()} 个元素')
+        return _queue
 
     def resolver_keys(self):
-        """析构密钥"""
-        raise NotImplementedError()
+        for item in self.keys:
+            _res = self.http_client.sync_get(item.absolute_uri)
+            self.keys[item.absolute_uri] = _res.content if _res.status_code == 200 else None
 
     def get_key(self, key_url, key=None) -> str or None:
         """"""
@@ -124,11 +129,6 @@ class BaseM3U8Down(M3U8):
 class AsyncM3U8Down(BaseM3U8Down):
     """"""
 
-    def resolver_keys(self):
-        for item in self.keys:
-            _res = self.http_client.sync_get(item.absolute_uri)
-            self.keys[item.absolute_uri] = _res.content if _res.status_code == 200 else None
-
     async def _async_ts_download(self, segment) -> bool:
         """
 
@@ -155,23 +155,22 @@ class AsyncM3U8Down(BaseM3U8Down):
             logger.error(f'下载失败！{_e}', exc_info=_e)
             return False
 
-    async def async_ts_down(self, task_name, queue):
+    async def async_down_task(self, task_name, queue: asyncio.Queue):
         while queue.qsize():
             index, seg = await queue.get()
             seg.renamed_uri = f'ts_{index:05d}.ts'
             logger.debug(f"{task_name}正在处理：{index} - {seg.uri}", )
-            await asyncio.sleep(2)
+            # await asyncio.sleep(2)
             if not await self._async_ts_download(seg):
                 queue.put_nowait((index, seg))
             queue.task_done()
 
-    async def async_download(self):
+    async def _async_download(self):
         logger.debug('正在准备协程队列')
-        download_queue = asyncio.Queue()
-        [download_queue.put_nowait(_) for _ in enumerate(self.segments)]
-        logger.info(f'协程队列已创建，共计{download_queue.qsize()} 个元素')
 
-        tasks = [asyncio.create_task(self.async_ts_down(f'协程下载-{i}', download_queue))
+        download_queue = self.download_queue()
+
+        tasks = [asyncio.create_task(self.async_down_task(f'协程下载-{i}', download_queue))
                  for i in range(self.thread)
                  ]
         logger.info(f'task 已经创建 {len(tasks)}')
@@ -181,38 +180,82 @@ class AsyncM3U8Down(BaseM3U8Down):
         [task.cancel() for task in tasks]
         logger.debug('等待直到所有工作任务都被取消。')
         await asyncio.gather(*tasks, return_exceptions=True)
-        self.save_path.joinpath('index.m3u8').write_text(self.dumps())
 
-    def download(self):
+    def async_download(self):
         logger.info('开始执行 Async Download ... ')
         logger.info(f"保存位置：{self.save_path}")
         logger.debug(f'{self.key}')
         logger.info(f'M3U8SQL Hash -> {self.db.prefix}  {self.db.m3u8_name}')
 
-        asyncio.run(self.async_download(), debug=True)
+        asyncio.run(self._async_download(), debug=True)
 
 
-def m3u8down():
-    """接口1"""
+class SyncM3U8Down(BaseM3U8Down):
+    def _thread_ts_download(self, segment):
+        if self.save_path.joinpath(segment.renamed_uri).exists():
+            logger.info(f'{segment.renamed_uri} 已经存在')
+            return True
+        logger.debug(f'下载, {type(self.http_client)}, {type(self.http_client.get)} {segment.absolute_uri}')
+        try:
+            _ts_content = self.http_client.get(segment.absolute_uri)
+            _ts_content = _ts_content.content
+
+            if segment.key is not None:
+                _ts_content = self.ts_decode(segment.key, _ts_content)
+                segment.key = None
+            self.save_path.joinpath(segment.renamed_uri).write_bytes(_ts_content)
+            segment.uri = segment.renamed_uri
+            return True
+        except Exception as _e:
+            logger.error(f'下载失败！{_e}', exc_info=_e)
+            return False
+
+    def thread_down_task(self, task_name, queue: Queue):
+        while queue.qsize():
+            index, seg = queue.get()
+            seg.renamed_uri = f'ts_{index:05d}.ts'
+            logger.debug(f"{task_name}正在处理：{index} - {seg.uri}", )
+            if not self._thread_ts_download(seg):
+                queue.put_nowait((index, seg))
+            queue.task_done()
+
+    def sync_download(self):
+        logger.info('开始执行 Thread Download ...')
+
+        download_queue = self.download_queue()
+
+        tasks = [threading.Thread(target=self.thread_down_task, args=(f'Thread-{i:02d}', download_queue))
+                 for i in range(self.thread)
+                 ]
+        [t.run() for t in tasks]
+        [t.join() for t in tasks]
 
 
-def m3u8downs():
-    """接口2"""
+class M3U8Down(AsyncM3U8Down, SyncM3U8Down):
+
+    def download(self):
+        if isinstance(self.http_client, AsyncHttpClient):
+            self.async_download()
+        elif isinstance(self.http_client, HttpClient):
+            self.sync_download()
+
+        self.save_path.joinpath('index.m3u8').write_text(self.dumps())
 
 
 if __name__ == '__main__':
     m3u8_log = logging.getLogger('sqllib')
-    console_handler.level = 0
+    console_handler.level = 20
+    file_handler = logging.FileHandler('D:/temp/m3u8down_debug.log', )
+    file_handler.level = 0
     m3u8_log.addHandler(console_handler)
     logger.addHandler(console_handler)
+    logger.addHandler(file_handler)
 
-    from objprint import op
-
-    _db = M3U8SQL('D:/Temp', 'https://v.baoshiyun.com/resource/media-861644078907392/lud/188ed3dfd07a44a7bf53bed61a13d841.m3u8',
-                  '1.1.【申论】基础精讲-1',
+    _db = M3U8SQL('D:/Temp', 'https://v.baoshiyun.com/resource/media-861644080513024/lud/b80373efc40a4574a7370e9a26f33a01.m3u8',
+                  '1.1.【申论】基础精讲-2',
                   )
 
-    a = AsyncM3U8Down(_db, 'https://v.baoshiyun.com/resource/media-861644078907392/lud/188ed3dfd07a44a7bf53bed61a13d841.m3u8',
-                      http_client=AsyncHttpClient(), key='165cb2bc1c699e26',
-                      thread=1)
+    a = M3U8Down(_db, 'https://v.baoshiyun.com/resource/media-861644080513024/lud/b80373efc40a4574a7370e9a26f33a01.m3u8',
+                 http_client=HttpClient(), key='081732bb2dfde2b6',
+                 thread=12)
     a.download()
