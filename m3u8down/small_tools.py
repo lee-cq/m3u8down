@@ -14,7 +14,7 @@ from urllib.parse import quote, unquote
 from Crypto.Cipher import AES
 
 __all__ = ['Bytes', 'sum_prefix_md5', 'sum_file_md5', 'URLDisassemble', 'now_timestamp', 'decode_aes128',
-           'logger', 'console_handler'
+           'logger', 'console_handler', 'formatter'
            ]
 
 logger = logging.getLogger("logger")  # 创建实例

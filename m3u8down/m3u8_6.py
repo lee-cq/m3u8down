@@ -13,11 +13,12 @@ import threading
 from typing import Union
 from queue import Queue
 
+import ffmpeg
 from m3u8 import M3U8 as _M3U8, Key as M3U8_Key
 
-from m3u8down.error import *
-from m3u8down.http_client import *
-from m3u8down.m3u8_sql import M3U8SQL
+from error import *
+from http_client import *
+from m3u8_sql import M3U8SQL
 
 
 class M3U8Combine:
@@ -32,7 +33,7 @@ class M3U8(_M3U8):
     """Main"""
 
     def __init__(self, m3u8_uri, http_client: Union[HttpClient, AsyncHttpClient] = HttpClient(), trace_variant=True):
-        logger.debug(f'M3u8: {m3u8_uri}, {trace_variant}')
+        logger.debug(f'开始解析： M3u8:{m3u8_uri}, 自动跟踪异型：{trace_variant}')
         self.http_client = http_client
         self.content_, self.base_uri_ = http_client.m3u8_download(m3u8_uri)
 
@@ -76,6 +77,8 @@ class BaseM3U8Down(M3U8):
         self.db = db
         self.key = key
         self.save_path = self.db.save_path
+        self.combine_path = self.save_path.with_suffix('.ts')
+        self.transcode_path = self.save_path.with_suffix('.mp4')
         self.save_path.mkdir(exist_ok=True, parents=True)
         self.thread = thread
 
@@ -241,21 +244,22 @@ class M3U8Down(AsyncM3U8Down, SyncM3U8Down):
 
         self.save_path.joinpath('index.m3u8').write_text(self.dumps())
 
+    def combine(self):
+        """"""
+        if self.combine_path.exists():
+            raise FileExistsError()
+        with self.combine_path.open('ab') as cf:
+            for item in self.save_path.iterdir():
+                if item.suffix == '.ts':
+                    cf.write(item.read_bytes())
 
-if __name__ == '__main__':
-    m3u8_log = logging.getLogger('sqllib')
-    console_handler.level = 20
-    file_handler = logging.FileHandler('D:/temp/m3u8down_debug.log', )
-    file_handler.level = 0
-    m3u8_log.addHandler(console_handler)
-    logger.addHandler(console_handler)
-    logger.addHandler(file_handler)
 
-    _db = M3U8SQL('D:/Temp', 'https://v.baoshiyun.com/resource/media-861644080513024/lud/b80373efc40a4574a7370e9a26f33a01.m3u8',
-                  '1.1.【申论】基础精讲-2',
-                  )
+def transcode_ffmpeg(in_file, out_file, ffmpeg_path=''):
+    """使用ffmpeg转码文件
 
-    a = M3U8Down(_db, 'https://v.baoshiyun.com/resource/media-861644080513024/lud/b80373efc40a4574a7370e9a26f33a01.m3u8',
-                 http_client=HttpClient(), key='081732bb2dfde2b6',
-                 thread=12)
-    a.download()
+    :param in_file: 完整的转码前的文件路径
+    :param out_file：输出文件路径
+    :param ffmpeg_path:
+    """
+    logger.info('转码文件 ... ')
+    ffmpeg.input(in_file).output(out_file).run(cmd=ffmpeg_path, overwrite_output=True)

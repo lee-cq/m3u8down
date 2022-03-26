@@ -8,9 +8,8 @@
 import time
 from pathlib import Path
 from sqllib import SQLiteAPI
-from sqllib.common.error import SqlWriteError
 
-from m3u8down.small_tools import sum_prefix_md5, logger
+from small_tools import sum_prefix_md5, logger
 
 
 class M3U8SQL(SQLiteAPI):
@@ -22,14 +21,17 @@ class M3U8SQL(SQLiteAPI):
     :param prefix - 计算好的前缀
     :param save_path - M3U8的保存位置
     """
-    _db = Path(__file__).parent.joinpath('.m3u8DownInfo.db')
+    _db_name = '.m3u8DownInfo.db'
     prefix_map_name = 'prefix_map'
 
-    def __init__(self, db=None, m3u8_uri=None, m3u8_name=None, base_path='', prefix=None, **kwargs):
+    def __init__(self, base_path='.', db=None, m3u8_uri=None, m3u8_name=None, prefix=None, **kwargs):
 
         if db:
             db = Path(db)
-            self._db = db.joinpath(self._db.name) if db.is_dir() else db
+            self._db = db.joinpath(self._db_name) if db.is_dir() else db
+        else:
+            self._db = Path(base_path).joinpath(self._db_name)
+        logger.debug(f'开始准备数据库对象, 位于: {self._db}, base_path= {base_path}')
 
         self.m3u8_name = m3u8_name
         self.m3u8_uri = m3u8_uri
@@ -57,7 +59,9 @@ class M3U8SQL(SQLiteAPI):
         try:
             return Path(self.prefix_map_select('save_path', WHERE=f'`prefix_md5`="{self.prefix}"')[0][0])
         except Exception as _e:
-            logger.error(f'{_e}', exc_info=_e)
+            logger.error(
+                f'预期失败：{_e}' + '\t查询内容' + str(self.prefix_map_select('save_path', WHERE=f'`prefix_md5`="{self.prefix}"')),
+            )
             return self.base_path.joinpath(self.m3u8_name)
 
     def make_prefix(self):

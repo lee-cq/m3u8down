@@ -10,7 +10,7 @@ import time
 import asyncio
 
 from m3u8.parser import urljoin as m3u8_urljoin
-from m3u8down.small_tools import *
+from small_tools import *
 from httpx import AsyncClient, Client, Response
 
 
