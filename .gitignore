@@ -5,6 +5,7 @@ __pycache__/
 .idea/
 .m3u8Download.db
 sss/
+result.json
 
 # C extensions
 *.so

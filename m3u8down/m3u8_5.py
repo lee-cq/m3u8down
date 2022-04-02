@@ -600,12 +600,4 @@ class M3U8:
 if __name__ == '__main__':
     logger.setLevel(logging.INFO)  # 设置日志文件等级
     logger.addHandler(console_handler)
-    # raise SystemExit('不要直接使用此脚本直接运行')
-    __url = 'https://videos3.naibago.com/20210306/1pondo-092515_160/index.m3u8'
-    M3U8(__url,
-         local_root='E:/Temp',
-         save_name='一本道092515-160 巨乳マニア 清水理紗',
-         # key='165cb2bc1c699e26',
-         is_transcode=True,
-         threads=30,
-         ).run()
+

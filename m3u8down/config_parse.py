@@ -34,7 +34,7 @@ import warnings
 from pathlib import Path
 from typing import Union
 
-from m3u8down.http_client import HttpClient, AsyncHttpClient
+from m3u8down import http_client
 
 
 class M3U8Config:
@@ -42,7 +42,8 @@ class M3U8Config:
         self.need_combine: bool = need_combine
         self.save_path = save_path
         self.threads = threads
-        self.http_client_class = http_client_class or (AsyncHttpClient if sys.version_info >= (3, 7) else HttpClient)
+        self.http_client_class = getattr(http_client, http_client_class) or (
+            http_client.AsyncHttpClient if sys.version_info >= (3, 7) else http_client.HttpClient)
 
 
 class TranscodeConfig:
@@ -71,6 +72,8 @@ class Config:
 
     def __init__(self, config_dict: dict):
         self.config_dict = config_dict
+
+        self.m3u8_db = None
 
         _m3u8_conf = config_dict.get('m3u8-conf', config_dict.get('m3u8-config', dict()))
         self.m3u8_config = M3U8Config(
@@ -103,3 +106,17 @@ class Config:
                 raise ValueError(f'需要转码时，必须手动指定ffmpeg的位置')
             elif Path(self.transcode_config.ffmpeg_path).is_file():
                 raise ValueError(f'指定的ffmpeg_path={self.transcode_config.ffmpeg_path} 不是一个文件')
+
+
+def parse_config_file(config_file):
+    """"""
+    config_file = Path(config_file)
+    if config_file.suffix == '.json':
+        from json import loads
+        _config = loads(config_file.read_text())
+    elif config_file.suffix in ['.yaml', '.yml']:
+        from yaml import safe_load
+        _config = safe_load(config_file.open())
+
+    else:
+        raise TypeError(f'错误的文件类型{config_file.suffix}, 仅支持yaml, json')

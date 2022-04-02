@@ -253,6 +253,14 @@ class M3U8Down(AsyncM3U8Down, SyncM3U8Down):
                 if item.suffix == '.ts':
                     cf.write(item.read_bytes())
 
+    def clean_segments(self):
+        for _i in self.save_path.iterdir():
+            _i.unlink()
+        self.save_path.rmdir()
+
+    def clean_combine(self):
+        self.combine_path.unlink(missing_ok=True)
+
 
 def transcode_ffmpeg(in_file, out_file, ffmpeg_path=''):
     """使用ffmpeg转码文件

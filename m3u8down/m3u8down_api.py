@@ -35,15 +35,16 @@ def m3u8down(uri,
     if headers:
         http_client.set_header(headers)
     _db = M3U8SQL(base_path=save_path, m3u8_uri=uri, m3u8_name=name)
-    _m3 = M3U8Down(db=_db, m3u8_uri=uri, http_client=http_client, key=key, thread=thread).download()
-    if need_combine:  # TODO
-        pass
-        if need_clean_down:  # Todo
-            pass
+    _m3 = M3U8Down(db=_db, m3u8_uri=uri, http_client=http_client, key=key, thread=thread)
+    _m3.download()
+    if need_combine:
+        _m3.combine()
+        if need_clean_down:
+            _m3.clean_segments()
     if need_transcode:  # TODO
         pass
-        if need_clean_combine:  # ToDO
-            pass
+        if need_clean_combine:  # ToDO TransCode 确保已经完成
+            _m3.clean_combine()
 
 
 def m3u8downs(config_file: Union[str, Path]):
