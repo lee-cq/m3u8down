@@ -96,20 +96,22 @@ def now_timestamp():
 def decode_aes128(data: bytes, key, iv='') -> bytes:
     """AES128解密"""
     logger.debug(f'解码AES-128： {key},  iv={iv}')
+    args = {
+        'key': key if isinstance(key, bytes) else bytes(key, encoding='utf8'),
+        'mode': AES.MODE_CBC,
+    }
     if iv:
-        ASE128 = AES.new(key if isinstance(key, bytes) else bytes(key, encoding='utf8'),
-                         AES.MODE_CBC,
-                         bytes(iv[-16:], encoding='utf8'))
-    else:
-        ASE128 = AES.new(key if isinstance(key, bytes) else bytes(key, encoding='utf8'),
-                         AES.MODE_CBC)
-    return ASE128.decrypt(data)
+        args.setdefault('iv', bytes(iv, encoding='utf8'))
+
+    return AES.new(**args).decrypt(data)
 
 
 class URLDisassemble:
 
-    def __init__(self, url, _query={}):
+    def __init__(self, url, _query=None):
         self._url = url
+        if _query is None:
+            _query = dict()
 
         self.protocol, _o1 = self._parse_(url, '://', 'http')
         self.domain, _o2 = self._parse_(_o1, '/')

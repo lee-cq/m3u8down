@@ -6,10 +6,3 @@
 @Date-Time  : 2020/7/30 11:40
 """
 __version__ = '0.6.0'
-
-from .m3u8_5 import M3U8
-
-__all__ = ['m3u8_download', 'M3U8', 'M3U8Down']
-
-m3u8_download = M3U8
-M3U8Down = M3U8
