@@ -6,13 +6,13 @@
 @Date-Time  : 2023/12/3 15:42
 
 """
+import os
 import platform
-import tarfile
 import tempfile
+from pathlib import Path
 
 import rich.progress
-
-from httpx import get, stream
+from httpx import stream
 
 from zipfile import ZipFile
 from tarfile import TarFile
@@ -25,19 +25,21 @@ download_url = {
     ("Linux", "aarch64"): "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz",
     ("Windows", "AMD64"): "https://ffmpeg.zeranoe.com/builds/win64/static/ffmpeg-latest-win64-static.zip",
     ("Windows", "x86"): "https://ffmpeg.zeranoe.com/builds/win32/static/ffmpeg-latest-win32-static.zip",
+
 }
 
 
 class Install:
     def __init__(self, url=None):
-        self.file = tempfile.NamedTemporaryFile()
+        os.chdir(Path(__file__).parent)
+        self.temp_file = tempfile.NamedTemporaryFile()
         self.url = url or self.get_url()
         self.name = self.url.split('/')[-1].split('?')[0]
         self.download(self.url)
         self.unpackage()
 
     def __del__(self):
-        self.file.close()
+        self.temp_file.close()
 
     @staticmethod
     def get_url():
@@ -60,17 +62,17 @@ class Install:
             ) as progress:
                 download_task = progress.add_task("Download", total=total)
                 for chunk in response.iter_bytes():
-                    self.file.write(chunk)
+                    self.temp_file.write(chunk)
                     progress.update(download_task, completed=response.num_bytes_downloaded)
 
     def unpackage(self):
         name = self.url.split('/')[-1].split('?')[0]
         if name.endswith(".zip"):
-            with ZipFile(self.file, 'r') as _f:
+            with ZipFile(self.temp_file.name, 'r') as _f:
                 _f.extractall()
 
-        if tarfile.is_tarfile(self.file):
-            with TarFile.open(self.file) as _f:
+        if '.tar' in name:
+            with TarFile.open(self.temp_file.name) as _f:
                 _f.extractall()
         print("解压完成")
 
