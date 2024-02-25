@@ -31,11 +31,11 @@ class TsMerger:
         """将合并后的ts文件转换为mp4文件"""
         if not self.exec_ffmpeg.exists():
             raise FileNotFoundError(f"ffmpeg 未找到: {self.exec_ffmpeg}")
-        subprocess.run([str(self.exec_ffmpeg),
-                        '-i', self.m3u8.as_posix(), '-c', 'copy',
-                        self.target.with_suffix('.mp4').as_posix()
-                        ],
-                       cwd=self.base_path,
-                       check=True
-                       )
-
+        subprocess.run(
+            [str(self.exec_ffmpeg),
+             '-i', self.m3u8.as_posix(), '-c', 'copy',
+             self.target.with_suffix('.mp4').as_posix()
+             ],
+            cwd=self.base_path,
+            check=True
+        )

@@ -18,14 +18,12 @@ from zipfile import ZipFile
 from tarfile import TarFile
 
 download_url = {
-
     ("Darwin", "arm64"): "https://evermeet.cx/ffmpeg/ffmpeg-6.1.zip",
     ("Darwin", "x86_64"): "https://evermeet.cx/ffmpeg/ffmpeg-6.1.zip",
     ("Linux", "x86_64"): "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz",
     ("Linux", "aarch64"): "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz",
     ("Windows", "AMD64"): "https://ffmpeg.zeranoe.com/builds/win64/static/ffmpeg-latest-win64-static.zip",
     ("Windows", "x86"): "https://ffmpeg.zeranoe.com/builds/win32/static/ffmpeg-latest-win32-static.zip",
-
 }
 
 
@@ -78,6 +76,4 @@ class Install:
 
 
 if __name__ == '__main__':
-    Install(
-        # 'https://alist.leecq.cn/d/local/Another%20Redis%20Desktop%20Manager.zip?sign=lctaqsRz3g2QU_IK71TNUQvXWFcrRLMe-keeiHsI5EQ=:0'
-    )
+    Install()

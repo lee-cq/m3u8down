@@ -12,16 +12,17 @@ import asyncio
 import json
 import logging
 import subprocess
-import time
 from pathlib import Path
 from urllib.parse import urljoin
 
 from m3u8 import M3U8, Key as M3U8Key, Segment
 from httpx import AsyncClient as _AsyncClient, Response, ReadTimeout
+from rich.progress import Progress, BarColumn, TimeRemainingColumn, TextColumn, \
+    ProgressColumn, SpinnerColumn
 
 from m3u8down.error import EncryptMethodNotImplemented
 from m3u8down.small_tools import decode_aes128
-from models import MetaInfo
+from m3u8down.models import MetaInfo
 
 logger = logging.getLogger('m3u8down.downloader')
 
@@ -47,40 +48,23 @@ class AsyncClient(_AsyncClient):
             **kwargs
     ) -> Response:
         try:
-            return await super().request(method, url, follow_redirects=follow_redirects, **kwargs)
+            return await super().request(method, url, follow_redirects=follow_redirects,
+                                         **kwargs)
         except ReadTimeout as _e:
             await asyncio.sleep(5)
             if retry:
                 logger.warning(f'超时重试：{url}')
-                return await self.request(method, url, follow_redirects=follow_redirects, retry=retry - 1, **kwargs)
+                return await self.request(method, url,
+                                          follow_redirects=follow_redirects,
+                                          retry=retry - 1, **kwargs)
             raise _e
 
     async def download(self, uri, timeout=None, headers=None):
         if headers is None:
             headers = {}
-        _s = await self.get(uri, timeout=timeout, headers=headers, follow_redirects=True)
+        _s = await self.get(uri, timeout=timeout, headers=headers,
+                            follow_redirects=True)
         return urljoin(_s.request.url.__str__(), '.'), _s.text
-
-
-class Speed:
-    def __init__(self):
-        self.start_time: int = -1
-        self._data: dict[int, int] = dict()  # 时间，数据量
-
-    def add(self, data: int):
-        if self.start_time == -1:
-            self.start_time = time.time_ns()
-        self._data.setdefault(time.time_ns(), data)
-
-    def get(self, seconds: int = 1):
-        """获取最近几秒的速度 (bytes/s)"""
-        d_ns = seconds * 10 ** 6
-        _now = time.time_ns()
-        return sum([i[1] for i in self._data.items() if _now - i[0] < d_ns]) / seconds
-
-    def average_speed(self):
-        """获取平均速度 (bytes/s)"""
-        return sum(zip(*self._data)[1]) / (int(time.time()) - self.start_time)
 
 
 class Downloader:
@@ -99,9 +83,15 @@ class Downloader:
         self.download_index = 0
         self.meta_file = self.save_path.joinpath('meta_info.json')
         self.meta: MetaInfo = MetaInfo(uri=uri)
-        self.spend: Speed = Speed()
-        self.downloaded_files = [i.name for i in self.save_path.iterdir() if i.is_file()]
+        self.progress: Progress = Progress()
+        self.progress_task = self.progress.add_task(
+            f"[red]{self.save_path.name} Downloading...", total=None)
+        self.downloaded_files = [i.name for i in self.save_path.iterdir() if
+                                 i.is_file()]
         self.load_meta()
+
+    def __del__(self):
+        self.progress.stop()
 
     def run(self):
         asyncio.run(self.async_run())
@@ -109,13 +99,21 @@ class Downloader:
     async def async_run(self):
 
         await self._load_m3u8()
+
+        self.progress.start_task(self.progress_task)
+        self.progress.update(
+            self.progress_task,
+            advance=len(self.downloaded_files),
+            total=len(self.m3u8.segments),
+        )
         await self.downloader()
         self.dump_m3u8()
         self.to_mp4()
 
     def load_meta(self):
         if self.meta_file.exists():
-            self.meta = MetaInfo(**json.loads(self.meta_file.read_text(encoding='utf-8')))
+            self.meta = MetaInfo(
+                **json.loads(self.meta_file.read_text(encoding='utf-8')))
         else:
             self.meta = MetaInfo(uri=self.uri)
             self.save_meta()
@@ -132,19 +130,23 @@ class Downloader:
             self.meta.m3u8_name = self.meta.uri.split('/')[-1]
             self.meta.base_uri = _base_uri
             self.save_meta()
-            self.save_path.joinpath(self.meta.m3u8_name).write_text(_content, encoding='utf-8')
+            self.save_path.joinpath(self.meta.m3u8_name).write_text(_content,
+                                                                    encoding='utf-8')
             self.meta.m3u8_rewrites = False
             logger.info('从网络加载M3U8文件： %s', self.meta.uri)
         else:
             self.m3u8 = M3U8(
-                self.save_path.joinpath(self.meta.m3u8_name).read_text(encoding='utf-8'),
+                self.save_path.joinpath(self.meta.m3u8_name).read_text(
+                    encoding='utf-8'),
                 base_uri=self.meta.base_uri
             )
-            logger.info('从本地加载M3U8文件： %s, base_uri: %s', self.meta.m3u8_name, self.meta.base_uri)
+            logger.info('从本地加载M3U8文件： %s, base_uri: %s', self.meta.m3u8_name,
+                        self.meta.base_uri)
 
     def dump_m3u8(self):
         """保存M3U8文件"""
-        self.save_path.joinpath(self.meta.m3u8_name).write_text(self.m3u8.dumps(), encoding='utf-8')
+        self.save_path.joinpath(self.meta.m3u8_name).write_text(self.m3u8.dumps(),
+                                                                encoding='utf-8')
         logger.info(f'保存M3U8文件到 {self.save_path.joinpath(self.meta.m3u8_name)}')
         self.meta.m3u8_rewrites = True
         self.save_meta()
@@ -176,13 +178,18 @@ class Downloader:
         key = self.meta.keys.get(_key_obj.uri)
 
         if _key_obj.method == 'AES-128':
-            return decode_aes128(_ts, key, _key_obj.iv[2:] if _key_obj.iv else '')
+            return decode_aes128(
+                _ts,
+                key,
+                _key_obj.iv[2:] if _key_obj.iv else ''
+            )
         elif _key_obj.method is None:
             return _ts
 
         raise EncryptMethodNotImplemented(f'加密方式{_key_obj.method}  的解码未实现。')
 
-    async def _async_ts_download(self, segment: Segment, semaphore: asyncio.Semaphore) -> bool:
+    async def _async_ts_download(self, segment: Segment,
+                                 semaphore: asyncio.Semaphore) -> bool:
         """异步下载TS
         :param segment:
         :return:
@@ -191,7 +198,8 @@ class Downloader:
 
             self.download_index += 1
             all_s = len(self.m3u8.segments)
-            down_s = len([i.name for i in self.save_path.iterdir() if i.name.endswith('.ts')])
+            down_s = len(
+                [i.name for i in self.save_path.iterdir() if i.name.endswith('.ts')])
 
             segment_name = segment.uri.split('/')[-1]
             if segment_name in self.downloaded_files:
@@ -203,12 +211,13 @@ class Downloader:
                 logger.info(f'正在下载：%s, %s, ([%04d]%04d/%04d)',
                             self.save_path.name,
                             segment.absolute_uri,
+                            down_s / all_s * 100,
                             down_s,
                             all_s
                             )
                 _ts_content = await self.client.get(segment.absolute_uri)
                 _ts_content = _ts_content.content
-                self.spend.add(len(_ts_content))
+                self.progress.update(self.progress_task, advance=1)
 
                 if segment.key is not None:
                     _ts_content = self.ts_decode(segment.key, _ts_content)
@@ -231,7 +240,6 @@ class Downloader:
                     name=f"{id(self)}_down_{_segment.uri}"
                 )
             )
-
         await asyncio.gather(*_all_tasks)
 
     def to_mp4(self):
@@ -247,3 +255,7 @@ class Downloader:
             cwd=self.save_path.parent,
             check=True
         )
+
+
+if __name__ == '__main__':
+    pass
